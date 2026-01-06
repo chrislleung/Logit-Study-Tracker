@@ -835,7 +835,7 @@ function App() {
       `}</style>
       <header className="App-header">
         <div style={{display: 'flex', justifyContent:'space-between', alignItems:'center', width: '100%', padding: '0 20px'}}>
-            <h1>📚 goat debate</h1>
+            <h1></h1>
             <div style={{position: 'relative'}}>
                 <button onClick={(e) => { e.stopPropagation(); setShowSettings(!showSettings); }} style={{background: 'none', border:'none', fontSize:'1.5rem', cursor:'pointer'}}>⚙️</button>
                 {showSettings && (
@@ -928,9 +928,9 @@ function App() {
         {activeSemesterId && (
           <>
             <div className="sub-nav">
-              <span className={`sub-nav-item ${activeView === 'tracker' ? 'active' : ''}`} onClick={() => setActiveView('tracker')}>📝 Tracker</span>
-              <span className={`sub-nav-item ${activeView === 'analytics' ? 'active' : ''}`} onClick={() => setActiveView('analytics')}>📊 Analytics</span>
-              <span className={`sub-nav-item ${activeView === 'calculator' ? 'active' : ''}`} onClick={() => setActiveView('calculator')}>🧮 Calculator</span>
+              <span className={`sub-nav-item ${activeView === 'tracker' ? 'active' : ''}`} onClick={() => setActiveView('tracker')}>Tracker</span>
+              <span className={`sub-nav-item ${activeView === 'analytics' ? 'active' : ''}`} onClick={() => setActiveView('analytics')}>Analytics</span>
+              <span className={`sub-nav-item ${activeView === 'calculator' ? 'active' : ''}`} onClick={() => setActiveView('calculator')}>Calculator</span>
             </div>
 
             <div className="main-layout">

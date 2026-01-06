@@ -2,6 +2,13 @@ const { app, BrowserWindow } = require('electron');
 const path = require('path');
 const isDev = !app.isPackaged; // Checks if we are in development mode
 
+// --- FIX: Force Windows to use your icon in the Taskbar ---
+// This ID must match the "appId" in your package.json build settings
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.logit.app');
+}
+// ---------------------------------------------------------
+
 function createWindow() {
   // Create the browser window.
   const win = new BrowserWindow({
@@ -11,8 +18,8 @@ function createWindow() {
       nodeIntegration: true, // Allows standard web features
       contextIsolation: false
     },
-    // Optional: Add an icon here later
-    // icon: path.join(__dirname, 'public/favicon.ico') 
+    // Ensure this file exists at: ./assets/icon.ico relative to main.js
+    icon: path.join(__dirname, 'assets/icon.ico') 
   });
 
   // Load the app

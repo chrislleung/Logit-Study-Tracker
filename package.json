@@ -25,8 +25,8 @@
     "electron:build": "npm run build && electron-builder -w"
   },
   "build": {
-    "appId": "com.studytracker.app",
-    "productName": "Study Tracker",
+    "appId": "com.logit.app",
+    "productName": "logit",
     "files": [
       "build/**/*",
       "node_modules/**/*",
@@ -38,7 +38,7 @@
     },
     "win": {
       "target": "nsis",
-      "icon": "public/favicon.ico"
+      "icon": "assets/icon.ico"
     }
   },
   "eslintConfig": {
