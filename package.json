@@ -26,6 +26,7 @@
   },
   "build": {
     "appId": "com.logit.app",
+    "extends": null,
     "productName": "logit",
     "files": [
       "build/**/*",
@@ -39,6 +40,14 @@
     "win": {
       "target": "nsis",
       "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "runAfterFinish": true
     }
   },
   "eslintConfig": {
