@@ -2,8 +2,7 @@
 
 A powerful, offline-first React application designed to help students track study time, manage grades, and analyze their study efficiency. It features a fully customizable UI, predictive grade calculation, and persistent local storage.
 
-* [Web Version]([https://www.oracle.com/java/technologies/downloads/](https://github.com/chrislleung/study-tracker-MongoDB)) using MongoDB
-* [Java JDK 17](https://www.oracle.com/java/technologies/downloads/) or higher
+* [Web Version]([https://www.oracle.com/java/technologies/downloads/]) using MongoDB
 
 ## 🚀 Features
 
