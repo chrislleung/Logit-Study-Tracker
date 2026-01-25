@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList,
   BarChart, Bar, Legend
@@ -28,12 +28,18 @@ function App() {
   // --- Global State ---
   const [semesters, setSemesters] = useState([]);
   const [activeSemesterId, setActiveSemesterId] = useState(null);
+  const [prevSemesterId, setPrevSemesterId] = useState(null);
+  
+  // Persistence for class selection
+  const selectionsRef = useRef({}); 
+
   const [newSemesterName, setNewSemesterName] = useState("");
   const [viewingArchived, setViewingArchived] = useState(false);
   const [openTabMenu, setOpenTabMenu] = useState(null);
 
   // --- View State ---
   const [activeView, setActiveView] = useState('tracker'); 
+  const [currentDate, setCurrentDate] = useState(new Date()); 
 
   // --- Theme State ---
   const [primaryColor, setPrimaryColor] = useState(localStorage.getItem('studyTrackerColor') || '#61dafb');
@@ -49,6 +55,15 @@ function App() {
 
   const [showSettings, setShowSettings] = useState(false);
 
+  // --- Modal State ---
+  const [modalConfig, setModalConfig] = useState({
+      isOpen: false,
+      title: "",
+      message: "",
+      type: "alert", 
+      onConfirm: null
+  });
+
   // --- Editing State ---
   const [editingSemesterId, setEditingSemesterId] = useState(null);
   const [tempSemesterName, setTempSemesterName] = useState("");
@@ -57,13 +72,14 @@ function App() {
   const [isStudying, setIsStudying] = useState(false);
   const [startTime, setStartTime] = useState(null);
   const [elapsed, setElapsed] = useState(0);
+  const [sessionTag, setSessionTag] = useState(""); 
   
   const [sessions, setSessions] = useState([]);
   const [subjects, setSubjects] = useState([]);
   
   // --- Log Management State ---
   const [showLogForm, setShowLogForm] = useState(false);
-  const [logFormData, setLogFormData] = useState({ id: null, subject: "", startTime: "", endTime: "" });
+  const [logFormData, setLogFormData] = useState({ id: null, subject: "", tag: "", startTime: "", endTime: "" });
   
   // --- Selection State ---
   const [selectedSubject, setSelectedSubject] = useState(""); 
@@ -84,6 +100,8 @@ function App() {
   const [gradeEntries, setGradeEntries] = useState([]);
   const [assignmentTypes, setAssignmentTypes] = useState([]); 
   const [weights, setWeights] = useState({});
+  const [remainingItems, setRemainingItems] = useState({}); // Qty Left
+
   const [newGradeEntry, setNewGradeEntry] = useState({ name: "", score: "", totalPoints: "100", category: "" });
   const [targetGrade, setTargetGrade] = useState(90);
   const [newTypeName, setNewTypeName] = useState("");
@@ -114,6 +132,118 @@ function App() {
     return sessions.reduce((acc, session) => acc + session.durationSeconds, 0);
   }, [sessions]);
 
+  // --- Modal Helpers ---
+  const showAlert = (title, message) => {
+      setModalConfig({ isOpen: true, title, message, type: 'alert', onConfirm: null });
+  };
+
+  const showConfirm = (title, message, action) => {
+      setModalConfig({ isOpen: true, title, message, type: 'confirm', onConfirm: action });
+  };
+
+  const closeModal = () => {
+      setModalConfig({ ...modalConfig, isOpen: false });
+  };
+
+  const handleModalConfirm = () => {
+      if (modalConfig.onConfirm) modalConfig.onConfirm();
+      closeModal();
+  };
+
+  // --- Calendar Logic ---
+  const calendarData = useMemo(() => {
+      const data = {};
+      if (!sessions || sessions.length === 0) return data;
+
+      sessions.forEach(session => {
+          if (!session.startTime) return; 
+
+          try {
+            const d = new Date(session.startTime);
+            if (isNaN(d.getTime())) return; 
+
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            const dateStr = `${year}-${month}-${day}`;
+
+            if (!data[dateStr]) data[dateStr] = 0;
+            data[dateStr] += session.durationSeconds;
+          } catch (e) {
+            console.error("Error processing session date:", e);
+          }
+      });
+      return data;
+  }, [sessions]);
+
+  const getCalendarCells = () => {
+      if (!currentDate || isNaN(currentDate.getTime())) return [];
+
+      const year = currentDate.getFullYear();
+      const month = currentDate.getMonth();
+      
+      const firstDay = new Date(year, month, 1);
+      const lastDay = new Date(year, month + 1, 0);
+      
+      const daysInMonth = lastDay.getDate();
+      const startDayOfWeek = firstDay.getDay(); 
+      
+      const cells = [];
+      
+      for (let i = 0; i < startDayOfWeek; i++) {
+          cells.push({ type: 'empty', key: `empty-${i}` });
+      }
+      
+      for (let i = 1; i <= daysInMonth; i++) {
+          const m = String(month + 1).padStart(2, '0');
+          const d = String(i).padStart(2, '0');
+          const dateStr = `${year}-${m}-${d}`;
+          
+          const seconds = calendarData[dateStr] || 0;
+          
+          cells.push({ 
+              type: 'day', 
+              day: i, 
+              key: `day-${i}`,
+              seconds: seconds,
+              hours: (seconds / 3600).toFixed(1)
+          });
+      }
+      return cells;
+  };
+
+  const getIntensityColor = (seconds) => {
+      if (seconds === 0) return 'rgba(255,255,255,0.05)';
+      const hours = seconds / 3600;
+      let r = 0, g = 0, b = 0;
+      try {
+        if (primaryColor && primaryColor.startsWith('#')) {
+            if (primaryColor.length === 4) {
+                r = parseInt(primaryColor[1] + primaryColor[1], 16);
+                g = parseInt(primaryColor[2] + primaryColor[2], 16);
+                b = parseInt(primaryColor[3] + primaryColor[3], 16);
+            } else if (primaryColor.length === 7) {
+                r = parseInt(primaryColor.slice(1, 3), 16);
+                g = parseInt(primaryColor.slice(3, 5), 16);
+                b = parseInt(primaryColor.slice(5, 7), 16);
+            }
+        }
+      } catch (e) { r = 100; g = 100; b = 100; }
+
+      let opacity = 0.2;
+      if (hours >= 6) opacity = 1;
+      else if (hours >= 3) opacity = 0.8;
+      else if (hours >= 1) opacity = 0.5;
+      
+      return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+  };
+
+  const changeMonth = (offset) => {
+      const newDate = new Date(currentDate);
+      newDate.setMonth(newDate.getMonth() + offset);
+      setCurrentDate(newDate);
+  };
+
   const subjectSummaries = useMemo(() => {
     const summary = {};
     sessions.forEach(session => {
@@ -125,21 +255,32 @@ function App() {
       .sort((a, b) => b.totalSeconds - a.totalSeconds);
   }, [sessions]);
 
+  // --- Assessment Stats ---
   const assessmentStats = useMemo(() => {
     if (!assessments.length) return [];
+    
+    // Filter sessions for the currently selected subject
     const subjectSessions = sessions.filter(s => s.subject === selectedSubject);
     
     const processedAssessments = [];
-    assignmentTypes.forEach(type => {
+    
+    // Collect all unique types found in assessments + any defined types
+    const distinctTypes = new Set(assessments.map(a => a.type));
+    assignmentTypes.forEach(t => distinctTypes.add(t));
+    const allTypesToProcess = Array.from(distinctTypes);
+    
+    allTypesToProcess.forEach(type => {
         const typeAssessments = assessments
             .filter(a => a.type === type)
             .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+        const typeSessions = subjectSessions.filter(s => s.tag === type);
 
         typeAssessments.forEach((assessment, index) => {
             const prevDate = index === 0 ? 0 : new Date(typeAssessments[index - 1].date).setHours(23, 59, 59, 999);
             const cutoffDate = new Date(assessment.date).setHours(23, 59, 59, 999);
 
-            const timeForAssigment = subjectSessions.reduce((total, session) => {
+            const timeForAssignment = typeSessions.reduce((total, session) => {
                 const sessionTime = new Date(session.startTime).getTime();
                 if (sessionTime > prevDate && sessionTime <= cutoffDate) {
                     return total + session.durationSeconds;
@@ -147,51 +288,54 @@ function App() {
                 return total;
             }, 0);
 
-            const hrs = parseFloat((timeForAssigment / 3600).toFixed(1));
+            const hrs = parseFloat((timeForAssignment / 3600).toFixed(1));
             const gradeVal = parseFloat(assessment.grade) || 0;
 
             processedAssessments.push({ 
                 ...assessment, 
-                calculatedTime: timeForAssigment,
+                calculatedTime: timeForAssignment,
                 hours: hrs, 
                 numericGrade: gradeVal,
                 efficiency: hrs > 0 ? parseFloat((gradeVal / hrs).toFixed(1)) : 0
             });
         });
     });
+    
     return processedAssessments.sort((a, b) => new Date(a.date) - new Date(b.date));
   }, [assessments, sessions, selectedSubject, assignmentTypes]);
 
   // --- FILTER Logic ---
   const filteredAssessments = useMemo(() => {
+      const hasFilter = Object.keys(visibleTypes).length > 0;
+      if (!hasFilter) return assessmentStats;
       return assessmentStats.filter(a => visibleTypes[a.type]);
   }, [assessmentStats, visibleTypes]);
 
   // Analytics
   const scatterData = useMemo(() => {
-    return assessmentStats.filter(a => a.numericGrade > 0).map(a => ({
+    return filteredAssessments.filter(a => a.numericGrade > 0).map(a => ({
       x: a.hours,
       y: a.numericGrade,
       name: `${a.name} (${a.type})`
     }));
-  }, [assessmentStats]);
+  }, [filteredAssessments]);
 
   const efficiencyData = useMemo(() => {
-    return assessmentStats.filter(a => a.numericGrade > 0).map(a => ({
+    return filteredAssessments.filter(a => a.numericGrade > 0).map(a => ({
       name: a.name,
       efficiency: a.efficiency
     }));
-  }, [assessmentStats]);
+  }, [filteredAssessments]);
 
   const avgEfficiency = useMemo(() => {
-    const graded = assessmentStats.filter(a => a.numericGrade > 0);
+    const graded = filteredAssessments.filter(a => a.numericGrade > 0);
     if (graded.length === 0) return 0;
     const totalEff = graded.reduce((sum, item) => sum + item.efficiency, 0);
     return (totalEff / graded.length).toFixed(1);
-  }, [assessmentStats]);
+  }, [filteredAssessments]);
 
   const prediction = useMemo(() => {
-    const points = assessmentStats.filter(a => a.numericGrade > 0 && a.hours > 0);
+    const points = filteredAssessments.filter(a => a.numericGrade > 0 && a.hours > 0);
     if (points.length < 2) return null;
     const n = points.length;
     let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
@@ -206,7 +350,7 @@ function App() {
     const slope = (n * sumXY - sumX * sumY) / denominator;
     const intercept = (sumY - slope * sumX) / n;
     return { slope, intercept };
-  }, [assessmentStats]);
+  }, [filteredAssessments]);
 
   // --- Grade Calculation Logic ---
   const calculationResult = useMemo(() => {
@@ -251,9 +395,18 @@ function App() {
         requiredScore = (targetGrade - pointsLockedIn) / (remainingWeight / 100);
     }
 
-    let predictedHours = 0;
+    let predictedHoursPerItem = 0;
+    let totalPredictedHours = 0;
+    
+    // Count total items left
+    const totalItemsLeft = Object.values(remainingItems).reduce((sum, count) => sum + (parseFloat(count) || 0), 0);
+
     if (prediction && prediction.slope !== 0) {
-      predictedHours = (requiredScore - prediction.intercept) / prediction.slope;
+      predictedHoursPerItem = (requiredScore - prediction.intercept) / prediction.slope;
+      
+      if (predictedHoursPerItem < 0) predictedHoursPerItem = 0;
+
+      totalPredictedHours = predictedHoursPerItem * totalItemsLeft;
     }
 
     return {
@@ -261,47 +414,44 @@ function App() {
       absoluteAverage: absoluteScore.toFixed(2),
       requiredScore: requiredScore.toFixed(2),
       remainingWeight: remainingWeight.toFixed(0),
-      predictedHours: predictedHours > 0 ? predictedHours.toFixed(1) : 0,
+      predictedHoursPerItem: predictedHoursPerItem > 0 ? predictedHoursPerItem.toFixed(1) : 0,
+      totalPredictedHours: totalPredictedHours > 0 ? totalPredictedHours.toFixed(1) : 0,
+      totalItemsLeft: totalItemsLeft,
       hasRegression: !!prediction
     };
-  }, [gradeEntries, assessments, weights, targetGrade, prediction, assignmentTypes]);
+  }, [gradeEntries, assessments, weights, targetGrade, prediction, assignmentTypes, remainingItems]);
 
   // --- Effects ---
   useEffect(() => { fetchSemesters(); }, []);
   
-  // Theme persistence
   useEffect(() => {
       localStorage.setItem('studyTrackerColor', primaryColor);
       localStorage.setItem('studyTrackerAccent', accentColor);
       localStorage.setItem('studyTrackerBg', backgroundColor);
       localStorage.setItem('studyTrackerText', textColor);
-      
       if(leftGif) localStorage.setItem('studyTrackerLeftGif', leftGif);
       else localStorage.removeItem('studyTrackerLeftGif');
-      
       if(rightGif) localStorage.setItem('studyTrackerRightGif', rightGif);
       else localStorage.removeItem('studyTrackerRightGif');
-
       localStorage.setItem('studyTrackerGifSize', gifSize);
       localStorage.setItem('studyTrackerGifSpacing', gifSpacing);
-
   }, [primaryColor, accentColor, backgroundColor, textColor, leftGif, rightGif, gifSize, gifSpacing]);
 
   useEffect(() => {
     if (activeSemesterId) {
       fetchSubjects(activeSemesterId);
       fetchSessions(activeSemesterId);
-      setSelectedSubject("");
-      setSelectedSubjectId("");
-      setAssessments([]);
-      setActiveView('tracker');
+      if (activeSemesterId !== prevSemesterId) {
+          setSessionTag(""); 
+          setAssessments([]);
+          setPrevSemesterId(activeSemesterId);
+      }
     }
-  }, [activeSemesterId]);
+  }, [activeSemesterId, prevSemesterId]);
 
   useEffect(() => {
     if (selectedSubjectId) {
       const sub = subjects.find(s => s.id === selectedSubjectId);
-      
       let loadedTypes = [];
       if (sub && sub.assignmentTypes && sub.assignmentTypes.length > 0) {
           loadedTypes = sub.assignmentTypes;
@@ -309,11 +459,11 @@ function App() {
           loadedTypes = [];
       }
       setAssignmentTypes(loadedTypes);
-      
-      const initialVisibility = {};
-      loadedTypes.forEach(t => initialVisibility[t] = true);
-      setVisibleTypes(initialVisibility);
-
+      setVisibleTypes(prev => {
+          const next = { ...prev };
+          loadedTypes.forEach(t => { if (next[t] === undefined) next[t] = true; });
+          return next;
+      });
       if (loadedTypes.length > 0) {
           setNewAssessment(prev => ({ ...prev, type: loadedTypes[0] }));
           setNewGradeEntry(prev => ({ ...prev, category: loadedTypes[0] }));
@@ -321,16 +471,16 @@ function App() {
           setNewAssessment(prev => ({ ...prev, type: "" }));
           setNewGradeEntry(prev => ({ ...prev, category: "" }));
       }
-
       if (sub && sub.gradeWeights) setWeights(sub.gradeWeights);
       else setWeights({});
-
+      setRemainingItems({});
       fetchAssessments(selectedSubjectId);
       fetchGrades(selectedSubjectId);
     } else {
       setAssessments([]);
       setGradeEntries([]);
       setAssignmentTypes([]);
+      setRemainingItems({});
     }
   }, [selectedSubjectId, subjects]);
 
@@ -352,22 +502,35 @@ function App() {
     document.addEventListener('click', closeMenu);
     return () => document.removeEventListener('click', closeMenu);
   }, []);
-
+  
   // --- API Calls ---
   const fetchSemesters = async () => { 
       const data = await db.semesters.toArray();
       setSemesters(data);
       const actives = data.filter(s => !s.archived);
-      if (actives.length > 0 && !activeSemesterId) setActiveSemesterId(actives[0].id);
+      if (actives.length > 0 && !activeSemesterId) {
+          setActiveSemesterId(actives[0].id);
+          setPrevSemesterId(actives[0].id); 
+      }
   };
 
   const fetchSubjects = async (semId) => { 
       const data = await db.subjects.where('semesterId').equals(semId).toArray();
       setSubjects(data); 
+      const savedId = selectionsRef.current[semId];
+      if (savedId && data.find(s => s.id === savedId)) {
+          const sub = data.find(s => s.id === savedId);
+          setSelectedSubject(sub.name);
+          setSelectedSubjectId(sub.id);
+      } else {
+          setSelectedSubject("");
+          setSelectedSubjectId("");
+      }
   };
 
   const fetchSessions = async (semId) => { 
-      const data = await db.sessions.where('semesterId').equals(semId).reverse().toArray();
+      const data = await db.sessions.where('semesterId').equals(semId).toArray();
+      data.sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
       setSessions(data);
   };
 
@@ -387,16 +550,14 @@ function App() {
   
   const handleAddType = async () => {
       if (!newTypeName.trim()) return;
-      if (assignmentTypes.includes(newTypeName)) return alert("Type already exists");
+      if (assignmentTypes.includes(newTypeName)) return showAlert("Error", "Type already exists");
       const updatedTypes = [...assignmentTypes, newTypeName];
       setAssignmentTypes(updatedTypes);
       setVisibleTypes(prev => ({...prev, [newTypeName]: true}));
-      
       if (updatedTypes.length === 1) {
           setNewAssessment(prev => ({...prev, type: newTypeName}));
           setNewGradeEntry(prev => ({...prev, category: newTypeName}));
       }
-
       setNewTypeName("");
       setWeights(prev => ({...prev, [newTypeName]: 0}));
       await saveTypes(selectedSubjectId, updatedTypes);
@@ -419,48 +580,43 @@ function App() {
 
   const submitRenameType = async (oldName) => {
       if (!tempRenamingName.trim()) return;
-      if (assignmentTypes.includes(tempRenamingName) && tempRenamingName !== oldName) return alert("Type already exists");
+      if (assignmentTypes.includes(tempRenamingName) && tempRenamingName !== oldName) return showAlert("Error", "Type already exists");
       const newName = tempRenamingName.trim();
-      
       const updatedTypes = assignmentTypes.map(t => t === oldName ? newName : t);
       setAssignmentTypes(updatedTypes);
-      
       const newWeights = { ...weights };
       if (newWeights[oldName] !== undefined) {
           newWeights[newName] = newWeights[oldName];
           delete newWeights[oldName];
       }
       setWeights(newWeights);
-
       await db.transaction('rw', db.gradeEntries, db.assessments, db.subjects, async () => {
           await db.gradeEntries.where({ subjectId: selectedSubjectId, category: oldName }).modify({ category: newName });
           await db.assessments.where({ subjectId: selectedSubjectId, type: oldName }).modify({ type: newName });
           await db.subjects.update(selectedSubjectId, { assignmentTypes: updatedTypes, gradeWeights: newWeights });
       });
-
       fetchGrades(selectedSubjectId);
       fetchAssessments(selectedSubjectId);
       setRenamingType(null);
   };
 
   const handleDeleteType = async (typeToDelete) => {
-      if (!window.confirm(`Delete "${typeToDelete}"?`)) return;
-      const updatedTypes = assignmentTypes.filter(t => t !== typeToDelete);
-      setAssignmentTypes(updatedTypes);
-      const newWeights = { ...weights };
-      delete newWeights[typeToDelete];
-      setWeights(newWeights);
-      await saveTypes(selectedSubjectId, updatedTypes);
-      handleSaveConfig(newWeights);
+      showConfirm("Delete Category?", `Are you sure you want to delete "${typeToDelete}"?`, async () => {
+        const updatedTypes = assignmentTypes.filter(t => t !== typeToDelete);
+        setAssignmentTypes(updatedTypes);
+        const newWeights = { ...weights };
+        delete newWeights[typeToDelete];
+        setWeights(newWeights);
+        await saveTypes(selectedSubjectId, updatedTypes);
+        await saveConfig(selectedSubjectId, newWeights);
+      });
   };
 
   const handleAddGrade = async () => {
-    if (!newGradeEntry.name || !newGradeEntry.score || !newGradeEntry.category) return alert("Please fill all fields.");
-    
+    if (!newGradeEntry.name || !newGradeEntry.score || !newGradeEntry.category) return showAlert("Missing Info", "Please fill all fields.");
     const scoreVal = parseFloat(newGradeEntry.score);
     const totalVal = parseFloat(newGradeEntry.totalPoints);
     const percentage = totalVal > 0 ? ((scoreVal / totalVal) * 100).toFixed(1) : 0;
-
     await db.assessments.add({
         name: newGradeEntry.name,
         type: newGradeEntry.category,
@@ -469,7 +625,6 @@ function App() {
         subjectId: selectedSubjectId
     });
     fetchAssessments(selectedSubjectId);
-    
     setNewGradeEntry({ ...newGradeEntry, name: "", score: "" });
   };
   
@@ -485,7 +640,7 @@ function App() {
   const handleSaveConfig = async (weightsToSave = weights) => { 
       if(!selectedSubjectId) return; 
       await saveConfig(selectedSubjectId, weightsToSave);
-      alert("Configuration Saved!");
+      showAlert("Success", "Configuration Saved!");
   };
 
   const startEditingGradeList = (item, type) => {
@@ -506,7 +661,6 @@ function App() {
           const score = parseFloat(editGradeData.score);
           const total = parseFloat(editGradeData.totalPoints);
           const percentage = total > 0 ? ((score / total) * 100).toFixed(1) : 0;
-          
           await db.assessments.update(editingGradeId, {
               name: editGradeData.name,
               type: editGradeData.category,
@@ -524,28 +678,26 @@ function App() {
   };
 
   const handleDeleteFromEdit = async () => {
-      if (!window.confirm("Delete this assignment?")) return;
-      if (editingGradeType === 'manual') {
-          await handleDeleteGrade(editingGradeId);
-      } else {
-          await handleDeleteAssessment(editingGradeId);
-      }
-      setEditingGradeId(null);
-      setEditingGradeType(null);
+      showConfirm("Delete Assignment?", "Are you sure you want to delete this assignment?", async () => {
+        if (editingGradeType === 'manual') {
+            await handleDeleteGrade(editingGradeId);
+        } else {
+            await handleDeleteAssessment(editingGradeId);
+        }
+        setEditingGradeId(null);
+        setEditingGradeType(null);
+      });
   };
 
   const handleAddAssessment = async () => { 
-      if (!newAssessment.name || !newAssessment.date || !selectedSubjectId || !newAssessment.type) return alert("Please select a Type."); 
-      
+      if (!newAssessment.name || !newAssessment.date || !selectedSubjectId || !newAssessment.type) return showAlert("Missing Info", "Please select a Type."); 
       const gradeVal = parseFloat(newAssessment.grade);
       const formattedGrade = !isNaN(gradeVal) ? gradeVal.toFixed(1) : "0.0";
-
       await db.assessments.add({ 
           ...newAssessment, 
           grade: formattedGrade, 
           subjectId: selectedSubjectId 
       });
-      
       setNewAssessment({ name: "", type: assignmentTypes[0] || "", date: "", grade: "" }); 
       fetchAssessments(selectedSubjectId); 
       setShowAddAssessment(false); 
@@ -565,9 +717,17 @@ function App() {
       fetchAssessments(selectedSubjectId); 
   };
 
-  // Standard Handlers
-  const handleSubjectChange = (e) => { const subName = e.target.value; setSelectedSubject(subName); const subObj = subjects.find(s => s.name === subName); setSelectedSubjectId(subObj ? subObj.id : ""); };
-  const handleStart = () => { if (!selectedSubject) return alert("Select a class!"); setStartTime(Date.now()); setIsStudying(true); setElapsed(0); };
+  const handleSubjectChange = (e) => { 
+      const subName = e.target.value; 
+      setSelectedSubject(subName); 
+      const subObj = subjects.find(s => s.name === subName); 
+      const newId = subObj ? subObj.id : "";
+      setSelectedSubjectId(newId); 
+      setSessionTag(""); 
+      if (activeSemesterId) selectionsRef.current[activeSemesterId] = newId;
+  };
+
+  const handleStart = () => { if (!selectedSubject) return showAlert("No Class", "Select a class first!"); setStartTime(Date.now()); setIsStudying(true); setElapsed(0); };
   
   const handleStop = async () => { 
       setIsStudying(false); 
@@ -577,9 +737,11 @@ function App() {
           endTime: new Date(endTime).toISOString(),
           durationSeconds: Math.floor((endTime - startTime) / 1000),
           subject: selectedSubject,
+          tag: sessionTag,
           semesterId: activeSemesterId
       });
       fetchSessions(activeSemesterId); 
+      setSessionTag(""); 
   };
   
   const formatTime = (seconds) => { const h = Math.floor(seconds / 3600); const m = Math.floor((seconds % 3600) / 60); const s = Math.floor(seconds % 60); return `${h}h ${m}m ${s}s`; };
@@ -588,10 +750,12 @@ function App() {
       if (!newSemesterName.trim()) return; 
       const id = await db.semesters.add({ name: newSemesterName, archived: false });
       setNewSemesterName(""); 
-      // Refresh logic: simplified for Dexie
       const allSemesters = await db.semesters.toArray();
       setSemesters(allSemesters);
-      if (!viewingArchived) setActiveSemesterId(id); 
+      if (!viewingArchived) {
+          setActiveSemesterId(id);
+          setPrevSemesterId(id);
+      }
   };
   
   const saveSemesterName = async (id, currentArchivedStatus) => { 
@@ -611,11 +775,11 @@ function App() {
   };
   
   const handleDeleteSemester = async (id) => { 
-      if (!window.confirm("Permanently delete this semester?")) return; 
-      await db.semesters.delete(id); 
-      // Optional: Delete subjects/sessions linked to it?
-      fetchSemesters();
-      if (activeSemesterId === id) setActiveSemesterId(null); 
+      showConfirm("Delete Semester?", "Are you sure you want to delete this semester permanently?", async () => {
+        await db.semesters.delete(id); 
+        fetchSemesters();
+        if (activeSemesterId === id) setActiveSemesterId(null); 
+      });
   };
   
   const handleAddSubject = async () => { 
@@ -630,20 +794,17 @@ function App() {
       fetchSubjects(activeSemesterId); 
   };
 
-  // --- NEW: Log Management Handlers ---
   const openAddLogForm = () => {
-      // Set defaults for new log
       const now = new Date();
       const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
-      
       const toLocalISO = (d) => {
           const offset = d.getTimezoneOffset() * 60000;
           return new Date(d.getTime() - offset).toISOString().slice(0, 16);
       };
-
       setLogFormData({
           id: null,
           subject: selectedSubject || (subjects.length > 0 ? subjects[0].name : ""),
+          tag: "",
           startTime: toLocalISO(oneHourAgo),
           endTime: toLocalISO(now)
       });
@@ -656,10 +817,10 @@ function App() {
           const offset = d.getTimezoneOffset() * 60000;
           return new Date(d.getTime() - offset).toISOString().slice(0, 16);
       };
-
       setLogFormData({
           id: session.id,
           subject: session.subject,
+          tag: session.tag || "",
           startTime: toLocalInput(session.startTime),
           endTime: toLocalInput(session.endTime)
       });
@@ -667,48 +828,41 @@ function App() {
   };
 
   const handleDeleteLog = async (id) => {
-      if(!window.confirm("Delete this log?")) return;
-      await db.sessions.delete(id);
-      fetchSessions(activeSemesterId);
+      showConfirm("Delete Log?", "Are you sure you want to delete this session log?", async () => {
+        await db.sessions.delete(id);
+        fetchSessions(activeSemesterId);
+      });
   };
 
   const handleSaveLog = async () => {
-      if(!logFormData.subject || !logFormData.startTime || !logFormData.endTime) return alert("Please fill all fields");
-      
+      if(!logFormData.subject || !logFormData.startTime || !logFormData.endTime) return showAlert("Error", "Please fill all fields");
       const start = new Date(logFormData.startTime);
       const end = new Date(logFormData.endTime);
-      
-      if(end <= start) return alert("End time must be after start time");
-
+      if(end <= start) return showAlert("Error", "End time must be after start time");
       const duration = Math.floor((end - start) / 1000);
-      
       const payload = {
           subject: logFormData.subject,
+          tag: logFormData.tag, 
           startTime: start.toISOString(),
           endTime: end.toISOString(),
           durationSeconds: duration,
           semesterId: activeSemesterId
       };
-
       if(logFormData.id) {
           await db.sessions.update(logFormData.id, payload);
       } else {
           await db.sessions.add(payload);
       }
-
       setShowLogForm(false);
       fetchSessions(activeSemesterId);
   };
 
-  // --- GIF Handlers ---
   const handleGifUpload = (e, side) => {
       const file = e.target.files[0];
       if (!file) return;
-      
       if (file.size > 2 * 1024 * 1024) {
-          return alert("File is too large. Please upload an image smaller than 2MB.");
+          return showAlert("File Too Large", "Please upload an image smaller than 2MB.");
       }
-      
       const reader = new FileReader();
       reader.onloadend = () => {
           if (side === 'left') setLeftGif(reader.result);
@@ -718,7 +872,7 @@ function App() {
   };
 
   const handleThemeReset = () => {
-      if (window.confirm("Are you sure you want to reset all theme settings to default?")) {
+      showConfirm("Reset Theme?", "Are you sure you want to reset all theme settings to default?", () => {
           setPrimaryColor('#61dafb');
           setAccentColor('#61dafb');
           setBackgroundColor('#282c34');
@@ -727,12 +881,14 @@ function App() {
           setGifSpacing(20);
           setLeftGif(null);
           setRightGif(null);
-      }
+      });
   };
 
   return (
     <div className="App">
       <style>{`
+        * { box-sizing: border-box; }
+        body { overflow-x: hidden; width: 100vw; }
         :root { 
             --primary-color: ${primaryColor};
             --accent-color: ${accentColor};
@@ -747,7 +903,7 @@ function App() {
             color: #000; 
         }
         
-        /* Accent (Tabs, Text) - Added !important to FORCE override */
+        /* Accent (Tabs, Text) */
         .active-tab { 
             background-color: transparent !important; 
             border-bottom: 2px solid var(--accent-color) !important; 
@@ -757,7 +913,6 @@ function App() {
         .highlight-card { border-left-color: var(--accent-color) !important; }
         .active-filter { background-color: var(--accent-color) !important; color: #000 !important; }
         
-        /* --- NEW: Force Accent Color on Blue UI Elements --- */
         .sub-nav-item.active {
             color: var(--accent-color) !important;
             border-bottom-color: var(--accent-color) !important;
@@ -769,7 +924,6 @@ function App() {
             color: var(--accent-color) !important;
             border-color: var(--accent-color) !important;
         }
-        /* --- UPDATED: Use Text Color for these specific elements --- */
         .summary-list .summary-name {
             color: var(--text-color) !important;
         }
@@ -777,7 +931,7 @@ function App() {
             color: var(--text-color) !important;
         }
 
-        /* Styles for pretty file input */
+        /* Inputs */
         input[type="file"] { display: none; }
         .custom-file-upload {
             border: 1px solid var(--text-color);
@@ -788,13 +942,11 @@ function App() {
             font-size: 0.8rem;
             text-align: center;
             width: 100%;
-            box-sizing: border-box;
             background: rgba(255,255,255,0.05);
             margin-bottom: 5px;
         }
         .custom-file-upload:hover { background: rgba(255,255,255,0.1); }
 
-        /* Overrides to make inputs visible on custom backgrounds */
         input:not([type="file"]), select, .tab-edit-input { 
             background-color: rgba(255,255,255,0.1); 
             color: var(--text-color); 
@@ -826,15 +978,150 @@ function App() {
             cursor: pointer;
         }
 
-        /* --- FIX: Ensure Dropdown Options are Readable --- */
-        /* Forces black text on white background for the dropdown popup itself */
+        /* Dropdown options */
         option {
             background-color: #ffffff !important;
             color: #000000 !important;
         }
+        
+        /* Calendar Styles */
+        .calendar-container {
+            width: 100%;
+            padding: 20px;
+            background: rgba(255,255,255,0.02);
+            border-radius: 10px;
+        }
+        .calendar-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .calendar-header h3 { margin: 0; color: var(--accent-color); }
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 5px;
+        }
+        .cal-day-header {
+            text-align: center;
+            font-weight: bold;
+            padding: 10px;
+            color: var(--text-color);
+            opacity: 0.7;
+        }
+        .cal-day {
+            aspect-ratio: 1;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            cursor: default;
+            font-size: 0.9rem;
+            color: #fff;
+            transition: transform 0.1s ease;
+        }
+        .cal-day:hover {
+            transform: scale(1.1);
+            z-index: 10;
+        }
+        .cal-tooltip {
+            position: absolute;
+            bottom: 100%;
+            background: #000;
+            color: #fff;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            white-space: nowrap;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+            z-index: 20;
+            margin-bottom: 5px;
+        }
+        .cal-day:hover .cal-tooltip {
+            opacity: 1;
+        }
+
+        /* --- New Vertical List Styles for Weights --- */
+        .weights-grid {
+            display: flex !important;
+            flex-direction: column !important;
+            gap: 8px;
+            width: 100%;
+        }
+        .weight-row {
+            display: grid !important;
+            grid-template-columns: minmax(120px, 2fr) 80px 80px; 
+            gap: 10px;
+            align-items: center;
+        }
+        .weight-input-group {
+            /* Inherits styles from .weight-row if applied correctly, but we set manually */
+            display: grid !important;
+            grid-template-columns: minmax(120px, 2fr) 80px 80px;
+            gap: 10px;
+            align-items: center;
+        }
+
+        /* --- Custom Modal Styles --- */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+        .modal-content {
+            background-color: var(--bg-color);
+            border: 1px solid var(--primary-color);
+            border-radius: 10px;
+            padding: 25px;
+            min-width: 300px;
+            max-width: 90%;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.5);
+            color: var(--text-color);
+        }
+        .modal-title {
+            margin-top: 0;
+            margin-bottom: 10px;
+            color: var(--accent-color);
+            font-size: 1.2rem;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            padding-bottom: 10px;
+        }
+        .modal-body {
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }
+        .modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
       `}</style>
       <header className="App-header">
-        <div style={{display: 'flex', justifyContent:'space-between', alignItems:'center', width: '100%', padding: '0 20px'}}>
+        {/* --- Custom Modal --- */}
+        {modalConfig.isOpen && (
+            <div className="modal-overlay" onClick={closeModal}>
+                <div className="modal-content" onClick={e => e.stopPropagation()}>
+                    <h3 className="modal-title">{modalConfig.title}</h3>
+                    <div className="modal-body">{modalConfig.message}</div>
+                    <div className="modal-actions">
+                        {modalConfig.type === 'confirm' && (
+                            <button className="btn-small" style={{background:'#555'}} onClick={closeModal}>Cancel</button>
+                        )}
+                        <button className="btn-small" onClick={handleModalConfirm}>OK</button>
+                    </div>
+                </div>
+            </div>
+        )}
+
+        <div style={{display: 'flex', justifyContent:'space-between', alignItems:'center', width: '100%', padding: '0 20px', height: '60px'}}>
             <h1></h1>
             <div style={{position: 'relative'}}>
                 <button onClick={(e) => { e.stopPropagation(); setShowSettings(!showSettings); }} style={{background: 'none', border:'none', fontSize:'1.5rem', cursor:'pointer'}}>⚙️</button>
@@ -843,8 +1130,7 @@ function App() {
                         <h4 style={{margin:'0 0 10px 0', borderBottom:`1px solid ${textColor}`, paddingBottom:'5px'}}>Theme Settings</h4>
                         
                         <div style={{display:'flex', flexDirection:'column', gap:'15px'}}>
-                            
-                            {/* Color Pickers */}
+                            {/* Theme Settings Content */}
                             <div style={{display:'flex', flexDirection:'column', gap:'8px'}}>
                                 <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
                                     <label style={{fontSize:'0.9rem'}}>Button Color</label>
@@ -866,7 +1152,6 @@ function App() {
 
                             <hr style={{width:'100%', borderColor: textColor, opacity:0.3}} />
 
-                            {/* GIF Controls */}
                             <div style={{fontSize:'0.9rem', fontWeight:'bold', marginBottom:'5px'}}>GIF Controls</div>
                             
                             <div>
@@ -895,7 +1180,6 @@ function App() {
                                 {rightGif && <button onClick={() => setRightGif(null)} style={{marginTop:'2px', fontSize:'0.7rem', padding:'2px 5px', cursor:'pointer', width:'100%', border:`1px solid ${textColor}`, background:'transparent', color:textColor}}>Clear Right GIF</button>}
                             </div>
 
-                            {/* Actions */}
                             <div style={{display:'flex', gap:'10px', marginTop:'10px'}}>
                                 <button onClick={() => setShowSettings(false)} style={{flex:1, padding:'5px', background: primaryColor, border:'none', borderRadius:'4px', color:'#000', fontWeight:'bold', cursor:'pointer'}}>Save</button>
                                 <button onClick={handleThemeReset} style={{flex:1, padding:'5px', background:'transparent', border:`1px solid ${textColor}`, borderRadius:'4px', color: textColor, cursor:'pointer'}}>Reset</button>
@@ -931,6 +1215,7 @@ function App() {
               <span className={`sub-nav-item ${activeView === 'tracker' ? 'active' : ''}`} onClick={() => setActiveView('tracker')}>Tracker</span>
               <span className={`sub-nav-item ${activeView === 'analytics' ? 'active' : ''}`} onClick={() => setActiveView('analytics')}>Analytics</span>
               <span className={`sub-nav-item ${activeView === 'calculator' ? 'active' : ''}`} onClick={() => setActiveView('calculator')}>Calculator</span>
+              <span className={`sub-nav-item ${activeView === 'calendar' ? 'active' : ''}`} onClick={() => setActiveView('calendar')}>Calendar</span>
             </div>
 
             <div className="main-layout">
@@ -947,6 +1232,20 @@ function App() {
 
                             <div className="timer-container" style={{margin:0}}>
                                 <select value={selectedSubject} onChange={handleSubjectChange} className="subject-select"><option value="" disabled>Select a Class</option>{subjects.map(sub => <option key={sub.id} value={sub.name}>{sub.name}</option>)}</select>
+                                
+                                <select 
+                                    value={sessionTag} 
+                                    onChange={(e) => setSessionTag(e.target.value)} 
+                                    className="subject-select" 
+                                    style={{marginTop:'10px', fontSize:'0.9rem', width:'80%', opacity: selectedSubject ? 1 : 0.5}}
+                                    disabled={!selectedSubject || isStudying}
+                                >
+                                    <option value="">General Study (No Tag)</option>
+                                    {assignmentTypes.map(t => (
+                                        <option key={t} value={t}>{t}</option>
+                                    ))}
+                                </select>
+
                                 <h2>{formatTime(elapsed)}</h2>
                                 {!isStudying ? <button className="btn start" onClick={handleStart} style={{backgroundColor: primaryColor, color: '#000'}}>Start Studying</button> : <button className="btn stop" onClick={handleStop}>Stop</button>}
                             </div>
@@ -972,6 +1271,15 @@ function App() {
                                           {subjects.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
                                       </select>
                                   </div>
+                                  
+                                  <div style={{marginBottom:'10px'}}>
+                                      <label style={{fontSize:'0.8rem', display:'block', marginBottom:'4px'}}>Tag (Category):</label>
+                                      <select value={logFormData.tag} onChange={e => setLogFormData({...logFormData, tag: e.target.value})} style={{width:'100%'}}>
+                                          <option value="">None</option>
+                                          {assignmentTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                                      </select>
+                                  </div>
+
                                   <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginBottom:'10px'}}>
                                       <input type="datetime-local" value={logFormData.startTime} onChange={e => setLogFormData({...logFormData, startTime: e.target.value})} />
                                       <input type="datetime-local" value={logFormData.endTime} onChange={e => setLogFormData({...logFormData, endTime: e.target.value})} />
@@ -988,6 +1296,7 @@ function App() {
                               <tr>
                                 <th>Date</th>
                                 <th>Class</th>
+                                <th>Tag</th>
                                 <th>Start</th>
                                 <th>End</th>
                                 <th>Duration</th>
@@ -999,6 +1308,7 @@ function App() {
                                 <tr key={s.id}>
                                   <td>{new Date(s.startTime).toLocaleDateString()}</td>
                                   <td>{s.subject}</td>
+                                  <td style={{fontSize:'0.85rem', opacity:0.8}}>{s.tag || '-'}</td>
                                   <td>{new Date(s.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
                                   <td>{new Date(s.endTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
                                   <td>{formatTime(s.durationSeconds)}</td>
@@ -1017,7 +1327,6 @@ function App() {
                     <div className="right-column">
                       <div className="summary-sidebar">
                         <h3>Subject Totals</h3>
-                        {/* --- Semester Total --- */}
                         <div className="summary-card" style={{borderLeft:`4px solid ${accentColor}`, marginBottom:'10px', background:'rgba(255,255,255,0.08)'}}>
                             <span className="summary-name" style={{fontWeight:'bold', color: textColor}}>Semester Total</span>
                             <span className="summary-time" style={{fontWeight:'bold', color: accentColor}}>{formatTime(semesterTotalSeconds)}</span>
@@ -1101,6 +1410,20 @@ function App() {
                   <div className="analytics-container-col">
                       {!selectedSubjectId ? <div className="empty-chart-msg">Please select a class.</div> : (
                           <>
+                            {/* Analytics Header with Filter Toggles */}
+                            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px'}}>
+                                <h3 style={{margin:0}}>Analytics</h3>
+                                <div className="filter-row" style={{justifyContent:'flex-end'}}>
+                                    <small style={{marginRight:'5px'}}>Filter:</small>
+                                    {assignmentTypes.map(t => (
+                                        <span key={t} className={`filter-badge ${visibleTypes[t] ? 'active-filter' : ''}`} onClick={() => toggleTypeVisibility(t)}>
+                                            {t}
+                                        </span>
+                                    ))}
+                                    {assignmentTypes.length === 0 && <small style={{fontStyle:'italic', opacity:0.6}}>No categories</small>}
+                                </div>
+                            </div>
+
                             <div className="metrics-row"><div className="metric-card"><h4>Avg. Efficiency</h4><p>{avgEfficiency} <span style={{fontSize:'1rem'}}>pts/hr</span></p></div></div>
                             <div className="chart-wrapper"><h3>Correlation</h3><ResponsiveContainer width="100%" height={250}><ScatterChart margin={{top:20,right:20,bottom:20,left:20}}><CartesianGrid strokeDasharray="3 3"/><XAxis type="number" dataKey="x" name="Hours"/><YAxis type="number" dataKey="y" name="Grade"/><Tooltip cursor={{strokeDasharray:'3 3'}}/><Scatter name="Assignments" data={scatterData} fill={primaryColor}/></ScatterChart></ResponsiveContainer></div>
                             <div className="chart-wrapper"><h3>Efficiency</h3><ResponsiveContainer width="100%" height={250}><BarChart data={efficiencyData}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="name"/><YAxis/><Tooltip/><Legend/><Bar dataKey="efficiency" fill="#82ca9d"/></BarChart></ResponsiveContainer></div>
@@ -1119,13 +1442,18 @@ function App() {
                                 <h3>Assignment Types & Weights</h3>
                                 <div className="add-type-row"><input placeholder="New Category (e.g. Lab)" value={newTypeName} onChange={e => setNewTypeName(e.target.value)} /><button onClick={handleAddType} className="btn-small">Add</button></div>
                                 <div className="weights-grid">
+                                    <div className="weight-row" style={{fontWeight:'bold', fontSize:'0.8rem', opacity:0.7, borderBottom:'1px solid rgba(255,255,255,0.1)', paddingBottom:'5px'}}>
+                                        <span>Category</span>
+                                        <span>Weight (%)</span>
+                                        <span>Qty Left</span>
+                                    </div>
                                     {assignmentTypes.map(type => (
                                         <div key={type} className="weight-input-group">
                                             {renamingType === type ? (
-                                                <div style={{display:'flex', alignItems:'center', marginBottom:'5px', gap:'5px'}}>
-                                                    <input value={tempRenamingName} onChange={(e) => setTempRenamingName(e.target.value)} className="rename-input" autoFocus />
-                                                    <button onClick={() => submitRenameType(type)} className="btn-small" style={{background:'#4CAF50', padding:'2px 8px'}}>✓</button>
-                                                    <button onClick={cancelRenameType} className="btn-small" style={{background:'#f44336', padding:'2px 8px'}}>✕</button>
+                                                <div style={{display:'flex', alignItems:'center', gap:'5px'}}>
+                                                    <input value={tempRenamingName} onChange={(e) => setTempRenamingName(e.target.value)} className="rename-input" autoFocus style={{width:'100%'}}/>
+                                                    <button onClick={() => submitRenameType(type)} className="btn-small" style={{background:'#4CAF50', padding:'2px 5px'}}>✓</button>
+                                                    <button onClick={cancelRenameType} className="btn-small" style={{background:'#f44336', padding:'2px 5px'}}>✕</button>
                                                 </div>
                                             ) : (
                                                 <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', position:'relative'}}>
@@ -1140,6 +1468,7 @@ function App() {
                                                 </div>
                                             )}
                                             <input type="number" placeholder="%" value={weights[type] || ""} onChange={(e) => setWeights({...weights, [type]: parseFloat(e.target.value)})} />
+                                            <input type="number" placeholder="#" value={remainingItems[type] || ""} onChange={(e) => setRemainingItems({...remainingItems, [type]: parseFloat(e.target.value)})} />
                                         </div>
                                     ))}
                                 </div>
@@ -1236,7 +1565,12 @@ function App() {
                                         )}
                                         <div style={{margin:'15px 0', borderTop:'1px solid rgba(255,255,255,0.1)'}}></div>
                                         <div className="res-row"><span>Required Score (Remaining {calculationResult.remainingWeight}%):</span><span className="highlight" style={{color: calculationResult.requiredScore > 100 ? '#ff4d4d' : primaryColor}}>{calculationResult.requiredScore}%</span></div>
-                                        <div className="study-prediction"><h4>Time Prediction</h4>{calculationResult.hasRegression ? (<p>Estimated study time needed:<br/><span className="giant-text">{calculationResult.predictedHours} Hours</span></p>) : (<p style={{opacity:0.7}}>Not enough data to predict time.</p>)}</div>
+                                        <div className="study-prediction"><h4>Time Prediction</h4>{calculationResult.hasRegression ? (
+                                            <div>
+                                                <p>Estimated study time needed:<br/><span className="giant-text">{calculationResult.totalPredictedHours} Hours</span></p>
+                                                <small style={{opacity:0.7}}>({calculationResult.predictedHoursPerItem} hrs/item for {calculationResult.totalItemsLeft} items)</small>
+                                            </div>
+                                        ) : (<p style={{opacity:0.7}}>Not enough data to predict time.</p>)}</div>
                                     </div>
                                 )}
                             </div>
@@ -1244,6 +1578,51 @@ function App() {
                       )}
                   </div>
               )}
+
+              {/* --- CALENDAR --- */}
+              {activeView === 'calendar' && (
+                  <div className="calendar-container">
+                      <div className="calendar-header">
+                          <button className="btn-small" onClick={() => changeMonth(-1)}>&lt; Prev</button>
+                          <h3>{currentDate.toLocaleDateString('default', { month: 'long', year: 'numeric' })}</h3>
+                          <button className="btn-small" onClick={() => changeMonth(1)}>Next &gt;</button>
+                      </div>
+                      <div className="calendar-grid">
+                          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
+                              <div key={d} className="cal-day-header">{d}</div>
+                          ))}
+                          {getCalendarCells().map((cell, index) => (
+                              <div 
+                                  key={cell.key} 
+                                  className="cal-day" 
+                                  style={{
+                                      backgroundColor: cell.type === 'day' ? getIntensityColor(cell.seconds) : 'transparent',
+                                      opacity: cell.type === 'empty' ? 0 : 1
+                                  }}
+                              >
+                                  {cell.type === 'day' && (
+                                      <>
+                                          <span>{cell.day}</span>
+                                          {cell.seconds > 0 && (
+                                              <span className="cal-tooltip">{cell.hours} hrs</span>
+                                          )}
+                                      </>
+                                  )}
+                              </div>
+                          ))}
+                      </div>
+                      <div style={{marginTop:'20px', display:'flex', alignItems:'center', gap:'10px', fontSize:'0.8rem', opacity:0.7}}>
+                          <span>Less</span>
+                          <div style={{width:'15px', height:'15px', background:'rgba(255,255,255,0.05)', borderRadius:'3px'}}></div>
+                          <div style={{width:'15px', height:'15px', background: getIntensityColor(1800), borderRadius:'3px'}}></div>
+                          <div style={{width:'15px', height:'15px', background: getIntensityColor(7200), borderRadius:'3px'}}></div>
+                          <div style={{width:'15px', height:'15px', background: getIntensityColor(14400), borderRadius:'3px'}}></div>
+                          <div style={{width:'15px', height:'15px', background: getIntensityColor(22000), borderRadius:'3px'}}></div>
+                          <span>More</span>
+                      </div>
+                  </div>
+              )}
+
             </div>
           </>
         )}
