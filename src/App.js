@@ -80,7 +80,8 @@ function App() {
   // --- Log Management State ---
   const [showLogForm, setShowLogForm] = useState(false);
   const [logFormData, setLogFormData] = useState({ id: null, subject: "", tag: "", startTime: "", endTime: "" });
-  
+  const [logFormTypes, setLogFormTypes] = useState([]); // Store types for the log being edited
+
   // --- Selection State ---
   const [selectedSubject, setSelectedSubject] = useState(""); 
   const [selectedSubjectId, setSelectedSubjectId] = useState(""); 
@@ -473,7 +474,11 @@ function App() {
       }
       if (sub && sub.gradeWeights) setWeights(sub.gradeWeights);
       else setWeights({});
-      setRemainingItems({});
+      
+      // Load remaining items if saved, else default to empty
+      if (sub && sub.remainingItems) setRemainingItems(sub.remainingItems);
+      else setRemainingItems({});
+
       fetchAssessments(selectedSubjectId);
       fetchGrades(selectedSubjectId);
     } else {
@@ -560,7 +565,12 @@ function App() {
       }
       setNewTypeName("");
       setWeights(prev => ({...prev, [newTypeName]: 0}));
+      
+      // Auto-save types immediately
       await saveTypes(selectedSubjectId, updatedTypes);
+      // Auto-save new 0 weight for the new type
+      const newWeights = {...weights, [newTypeName]: 0};
+      await saveConfig(selectedSubjectId, newWeights, remainingItems);
   };
 
   const toggleTypeVisibility = (type) => {
@@ -584,16 +594,30 @@ function App() {
       const newName = tempRenamingName.trim();
       const updatedTypes = assignmentTypes.map(t => t === oldName ? newName : t);
       setAssignmentTypes(updatedTypes);
+      
       const newWeights = { ...weights };
       if (newWeights[oldName] !== undefined) {
           newWeights[newName] = newWeights[oldName];
           delete newWeights[oldName];
       }
       setWeights(newWeights);
+
+      const newRemainingItems = { ...remainingItems };
+      if (newRemainingItems[oldName] !== undefined) {
+          newRemainingItems[newName] = newRemainingItems[oldName];
+          delete newRemainingItems[oldName];
+      }
+      setRemainingItems(newRemainingItems);
+
       await db.transaction('rw', db.gradeEntries, db.assessments, db.subjects, async () => {
           await db.gradeEntries.where({ subjectId: selectedSubjectId, category: oldName }).modify({ category: newName });
           await db.assessments.where({ subjectId: selectedSubjectId, type: oldName }).modify({ type: newName });
-          await db.subjects.update(selectedSubjectId, { assignmentTypes: updatedTypes, gradeWeights: newWeights });
+          // Auto-save updates
+          await db.subjects.update(selectedSubjectId, { 
+              assignmentTypes: updatedTypes, 
+              gradeWeights: newWeights,
+              remainingItems: newRemainingItems
+          });
       });
       fetchGrades(selectedSubjectId);
       fetchAssessments(selectedSubjectId);
@@ -604,11 +628,17 @@ function App() {
       showConfirm("Delete Category?", `Are you sure you want to delete "${typeToDelete}"?`, async () => {
         const updatedTypes = assignmentTypes.filter(t => t !== typeToDelete);
         setAssignmentTypes(updatedTypes);
+        
         const newWeights = { ...weights };
         delete newWeights[typeToDelete];
         setWeights(newWeights);
+
+        const newRemaining = { ...remainingItems };
+        delete newRemaining[typeToDelete];
+        setRemainingItems(newRemaining);
+
         await saveTypes(selectedSubjectId, updatedTypes);
-        await saveConfig(selectedSubjectId, newWeights);
+        await saveConfig(selectedSubjectId, newWeights, newRemaining);
       });
   };
 
@@ -633,13 +663,14 @@ function App() {
       fetchGrades(selectedSubjectId); 
   };
   
-  const saveConfig = async (id, w) => {
-      await db.subjects.update(id, { gradeWeights: w });
+  // Updated saveConfig to accept remainingItems too
+  const saveConfig = async (id, w, r = remainingItems) => {
+      await db.subjects.update(id, { gradeWeights: w, remainingItems: r });
   };
 
   const handleSaveConfig = async (weightsToSave = weights) => { 
       if(!selectedSubjectId) return; 
-      await saveConfig(selectedSubjectId, weightsToSave);
+      await saveConfig(selectedSubjectId, weightsToSave, remainingItems);
       showAlert("Success", "Configuration Saved!");
   };
 
@@ -808,6 +839,9 @@ function App() {
           startTime: toLocalISO(oneHourAgo),
           endTime: toLocalISO(now)
       });
+      
+      // Default tag list is current subject's types
+      setLogFormTypes(assignmentTypes);
       setShowLogForm(true);
   };
 
@@ -817,6 +851,15 @@ function App() {
           const offset = d.getTimezoneOffset() * 60000;
           return new Date(d.getTime() - offset).toISOString().slice(0, 16);
       };
+      
+      // FIX: Find the assignment types for the subject of THIS specific log
+      const logSubject = subjects.find(s => s.name === session.subject);
+      let types = [];
+      if (logSubject && logSubject.assignmentTypes) {
+          types = logSubject.assignmentTypes;
+      }
+      setLogFormTypes(types);
+
       setLogFormData({
           id: session.id,
           subject: session.subject,
@@ -825,6 +868,17 @@ function App() {
           endTime: toLocalInput(session.endTime)
       });
       setShowLogForm(true);
+  };
+  
+  // Handle changing subject in log form to update tag list dynamically
+  const handleLogFormSubjectChange = (newSubjectName) => {
+      const logSubject = subjects.find(s => s.name === newSubjectName);
+      let types = [];
+      if (logSubject && logSubject.assignmentTypes) {
+          types = logSubject.assignmentTypes;
+      }
+      setLogFormTypes(types);
+      setLogFormData({...logFormData, subject: newSubjectName, tag: ""}); // Reset tag on subject change
   };
 
   const handleDeleteLog = async (id) => {
@@ -1121,6 +1175,50 @@ function App() {
             </div>
         )}
 
+        {/* --- Log Editing Modal --- */}
+        {showLogForm && (
+            <div className="modal-overlay" onClick={() => setShowLogForm(false)}>
+                <div className="modal-content" onClick={e => e.stopPropagation()} style={{maxWidth: '400px'}}>
+                    <h3 className="modal-title">{logFormData.id ? "Edit Log" : "New Log"}</h3>
+                    <div className="modal-body">
+                        <label style={{display:'block', marginBottom:'5px', fontSize:'0.9rem'}}>Class:</label>
+                        <select 
+                            value={logFormData.subject} 
+                            onChange={e => handleLogFormSubjectChange(e.target.value)} 
+                            style={{width:'100%', marginBottom:'15px', padding:'8px'}}
+                        >
+                            {subjects.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                        </select>
+
+                        <label style={{display:'block', marginBottom:'5px', fontSize:'0.9rem'}}>Tag (Category):</label>
+                        <select 
+                            value={logFormData.tag} 
+                            onChange={e => setLogFormData({...logFormData, tag: e.target.value})} 
+                            style={{width:'100%', marginBottom:'15px', padding:'8px'}}
+                        >
+                            <option value="">None</option>
+                            {logFormTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+
+                        <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginBottom:'15px'}}>
+                            <div>
+                                <label style={{fontSize:'0.8rem'}}>Start Time:</label>
+                                <input type="datetime-local" value={logFormData.startTime} onChange={e => setLogFormData({...logFormData, startTime: e.target.value})} style={{width:'100%'}}/>
+                            </div>
+                            <div>
+                                <label style={{fontSize:'0.8rem'}}>End Time:</label>
+                                <input type="datetime-local" value={logFormData.endTime} onChange={e => setLogFormData({...logFormData, endTime: e.target.value})} style={{width:'100%'}}/>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="modal-actions">
+                        <button className="btn-small" style={{background:'#555'}} onClick={() => setShowLogForm(false)}>Cancel</button>
+                        <button className="btn-small" onClick={handleSaveLog}>Save</button>
+                    </div>
+                </div>
+            </div>
+        )}
+
         <div style={{display: 'flex', justifyContent:'space-between', alignItems:'center', width: '100%', padding: '0 20px', height: '60px'}}>
             <h1></h1>
             <div style={{position: 'relative'}}>
@@ -1263,33 +1361,7 @@ function App() {
                               <button className="btn-small" onClick={openAddLogForm}>+ Add Log</button>
                           </div>
 
-                          {showLogForm && (
-                              <div className="sidebar-form" style={{marginBottom:'15px', background:'rgba(255,255,255,0.05)', padding:'15px'}}>
-                                  <h4 style={{marginTop:0}}>{logFormData.id ? "Edit Log" : "New Log"}</h4>
-                                  <div style={{display:'flex', gap:'10px', marginBottom:'10px'}}>
-                                      <select value={logFormData.subject} onChange={e => setLogFormData({...logFormData, subject: e.target.value})} style={{flex:1}}>
-                                          {subjects.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
-                                      </select>
-                                  </div>
-                                  
-                                  <div style={{marginBottom:'10px'}}>
-                                      <label style={{fontSize:'0.8rem', display:'block', marginBottom:'4px'}}>Tag (Category):</label>
-                                      <select value={logFormData.tag} onChange={e => setLogFormData({...logFormData, tag: e.target.value})} style={{width:'100%'}}>
-                                          <option value="">None</option>
-                                          {assignmentTypes.map(t => <option key={t} value={t}>{t}</option>)}
-                                      </select>
-                                  </div>
-
-                                  <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginBottom:'10px'}}>
-                                      <input type="datetime-local" value={logFormData.startTime} onChange={e => setLogFormData({...logFormData, startTime: e.target.value})} />
-                                      <input type="datetime-local" value={logFormData.endTime} onChange={e => setLogFormData({...logFormData, endTime: e.target.value})} />
-                                  </div>
-                                  <div style={{display:'flex', gap:'10px'}}>
-                                      <button className="btn-full" onClick={handleSaveLog}>Save</button>
-                                      <button className="btn-full" style={{background:'#555'}} onClick={() => setShowLogForm(false)}>Cancel</button>
-                                  </div>
-                              </div>
-                          )}
+                          {/* Removed inline form, replaced by modal at top */}
 
                           <table>
                             <thead>
@@ -1439,7 +1511,17 @@ function App() {
                           <>
                             {/* 1. CONFIGURATION */}
                             <div className="calc-card">
-                                <h3>Assignment Types & Weights</h3>
+                                <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px'}}>
+                                    <h3 style={{margin:0}}>Assignment Types & Weights</h3>
+                                    {/* Class Selector for Calculator */}
+                                    <select 
+                                        value={selectedSubject} 
+                                        onChange={handleSubjectChange} 
+                                        style={{padding:'4px', fontSize:'0.9rem', maxWidth:'150px'}}
+                                    >
+                                        {subjects.map(sub => <option key={sub.id} value={sub.name}>{sub.name}</option>)}
+                                    </select>
+                                </div>
                                 <div className="add-type-row"><input placeholder="New Category (e.g. Lab)" value={newTypeName} onChange={e => setNewTypeName(e.target.value)} /><button onClick={handleAddType} className="btn-small">Add</button></div>
                                 <div className="weights-grid">
                                     <div className="weight-row" style={{fontWeight:'bold', fontSize:'0.8rem', opacity:0.7, borderBottom:'1px solid rgba(255,255,255,0.1)', paddingBottom:'5px'}}>
@@ -1467,8 +1549,22 @@ function App() {
                                                     )}
                                                 </div>
                                             )}
-                                            <input type="number" placeholder="%" value={weights[type] || ""} onChange={(e) => setWeights({...weights, [type]: parseFloat(e.target.value)})} />
-                                            <input type="number" placeholder="#" value={remainingItems[type] || ""} onChange={(e) => setRemainingItems({...remainingItems, [type]: parseFloat(e.target.value)})} />
+                                            {/* Auto-save on blur for weight */}
+                                            <input 
+                                                type="number" 
+                                                placeholder="%" 
+                                                value={weights[type] || ""} 
+                                                onChange={(e) => setWeights({...weights, [type]: parseFloat(e.target.value)})} 
+                                                onBlur={() => handleSaveConfig()} 
+                                            />
+                                            {/* Auto-save on blur for qty */}
+                                            <input 
+                                                type="number" 
+                                                placeholder="#" 
+                                                value={remainingItems[type] || ""} 
+                                                onChange={(e) => setRemainingItems({...remainingItems, [type]: parseFloat(e.target.value)})}
+                                                onBlur={() => handleSaveConfig()} 
+                                            />
                                         </div>
                                     ))}
                                 </div>
