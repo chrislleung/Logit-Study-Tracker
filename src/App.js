@@ -74,13 +74,20 @@ function App() {
   const [elapsed, setElapsed] = useState(0);
   const [sessionTag, setSessionTag] = useState(""); 
   
+  // Use refs for timer state so they are accessible in event listeners
+  const isStudyingRef = useRef(false);
+  const startTimeRef = useRef(null);
+  const selectedSubjectRef = useRef("");
+  const sessionTagRef = useRef("");
+  const activeSemesterIdRef = useRef(null);
+
   const [sessions, setSessions] = useState([]);
   const [subjects, setSubjects] = useState([]);
   
   // --- Log Management State ---
   const [showLogForm, setShowLogForm] = useState(false);
   const [logFormData, setLogFormData] = useState({ id: null, subject: "", tag: "", startTime: "", endTime: "" });
-  const [logFormTypes, setLogFormTypes] = useState([]); // Store types for the log being edited
+  const [logFormTypes, setLogFormTypes] = useState([]); 
 
   // --- Selection State ---
   const [selectedSubject, setSelectedSubject] = useState(""); 
@@ -425,6 +432,38 @@ function App() {
   // --- Effects ---
   useEffect(() => { fetchSemesters(); }, []);
   
+  // Sync refs for auto-save logic
+  useEffect(() => { isStudyingRef.current = isStudying; }, [isStudying]);
+  useEffect(() => { startTimeRef.current = startTime; }, [startTime]);
+  useEffect(() => { selectedSubjectRef.current = selectedSubject; }, [selectedSubject]);
+  useEffect(() => { sessionTagRef.current = sessionTag; }, [sessionTag]);
+  useEffect(() => { activeSemesterIdRef.current = activeSemesterId; }, [activeSemesterId]);
+
+  // Auto-save on Close
+  useEffect(() => {
+      const handleBeforeUnload = (event) => {
+          if (isStudyingRef.current && startTimeRef.current && selectedSubjectRef.current) {
+              const endTime = Date.now();
+              const duration = Math.floor((endTime - startTimeRef.current) / 1000);
+              
+              // We must use a synchronous save or Navigator.sendBeacon because async await might be killed
+              // However, Dexie is async. Best effort is to trigger the promise.
+              // Note: Most browsers might not wait for IndexedDB on unload, but this is the best attempt for a web app.
+              db.sessions.add({
+                  startTime: new Date(startTimeRef.current).toISOString(),
+                  endTime: new Date(endTime).toISOString(),
+                  durationSeconds: duration,
+                  subject: selectedSubjectRef.current,
+                  tag: sessionTagRef.current,
+                  semesterId: activeSemesterIdRef.current
+              });
+          }
+      };
+
+      window.addEventListener("beforeunload", handleBeforeUnload);
+      return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
+
   useEffect(() => {
       localStorage.setItem('studyTrackerColor', primaryColor);
       localStorage.setItem('studyTrackerAccent', accentColor);
@@ -475,7 +514,6 @@ function App() {
       if (sub && sub.gradeWeights) setWeights(sub.gradeWeights);
       else setWeights({});
       
-      // Load remaining items if saved, else default to empty
       if (sub && sub.remainingItems) setRemainingItems(sub.remainingItems);
       else setRemainingItems({});
 
@@ -566,9 +604,7 @@ function App() {
       setNewTypeName("");
       setWeights(prev => ({...prev, [newTypeName]: 0}));
       
-      // Auto-save types immediately
       await saveTypes(selectedSubjectId, updatedTypes);
-      // Auto-save new 0 weight for the new type
       const newWeights = {...weights, [newTypeName]: 0};
       await saveConfig(selectedSubjectId, newWeights, remainingItems);
   };
@@ -612,7 +648,6 @@ function App() {
       await db.transaction('rw', db.gradeEntries, db.assessments, db.subjects, async () => {
           await db.gradeEntries.where({ subjectId: selectedSubjectId, category: oldName }).modify({ category: newName });
           await db.assessments.where({ subjectId: selectedSubjectId, type: oldName }).modify({ type: newName });
-          // Auto-save updates
           await db.subjects.update(selectedSubjectId, { 
               assignmentTypes: updatedTypes, 
               gradeWeights: newWeights,
@@ -663,7 +698,6 @@ function App() {
       fetchGrades(selectedSubjectId); 
   };
   
-  // Updated saveConfig to accept remainingItems too
   const saveConfig = async (id, w, r = remainingItems) => {
       await db.subjects.update(id, { gradeWeights: w, remainingItems: r });
   };
@@ -792,8 +826,11 @@ function App() {
   const saveSemesterName = async (id, currentArchivedStatus) => { 
       if (!tempSemesterName.trim()) return; 
       await db.semesters.update(id, { name: tempSemesterName });
-      const updated = semesters.map(s => s.id === id ? { ...s, name: tempSemesterName } : s); 
-      setSemesters(updated); 
+      
+      // Update local state directly instead of refetching entire list
+      // This prevents the full component re-render loop that wipes the timer state
+      setSemesters(prev => prev.map(s => s.id === id ? { ...s, name: tempSemesterName } : s));
+      
       setEditingSemesterId(null); 
   };
   
@@ -852,7 +889,6 @@ function App() {
           return new Date(d.getTime() - offset).toISOString().slice(0, 16);
       };
       
-      // FIX: Find the assignment types for the subject of THIS specific log
       const logSubject = subjects.find(s => s.name === session.subject);
       let types = [];
       if (logSubject && logSubject.assignmentTypes) {
@@ -870,7 +906,6 @@ function App() {
       setShowLogForm(true);
   };
   
-  // Handle changing subject in log form to update tag list dynamically
   const handleLogFormSubjectChange = (newSubjectName) => {
       const logSubject = subjects.find(s => s.name === newSubjectName);
       let types = [];
@@ -878,7 +913,7 @@ function App() {
           types = logSubject.assignmentTypes;
       }
       setLogFormTypes(types);
-      setLogFormData({...logFormData, subject: newSubjectName, tag: ""}); // Reset tag on subject change
+      setLogFormData({...logFormData, subject: newSubjectName, tag: ""}); 
   };
 
   const handleDeleteLog = async (id) => {
@@ -1005,6 +1040,7 @@ function App() {
             background-color: rgba(255,255,255,0.1); 
             color: var(--text-color); 
             border: 1px solid var(--text-color);
+            box-sizing: border-box; /* Ensures padding is included in width */
         }
         .calc-card, .sidebar-form, .assessment-card, .grade-item, .summary-card {
             background-color: rgba(255,255,255,0.05);
@@ -1201,11 +1237,11 @@ function App() {
                         </select>
 
                         <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginBottom:'15px'}}>
-                            <div>
+                            <div style={{minWidth: 0}}> {/* Added minWidth: 0 to constraint input */}
                                 <label style={{fontSize:'0.8rem'}}>Start Time:</label>
                                 <input type="datetime-local" value={logFormData.startTime} onChange={e => setLogFormData({...logFormData, startTime: e.target.value})} style={{width:'100%'}}/>
                             </div>
-                            <div>
+                            <div style={{minWidth: 0}}> {/* Added minWidth: 0 to constraint input */}
                                 <label style={{fontSize:'0.8rem'}}>End Time:</label>
                                 <input type="datetime-local" value={logFormData.endTime} onChange={e => setLogFormData({...logFormData, endTime: e.target.value})} style={{width:'100%'}}/>
                             </div>
@@ -1708,13 +1744,13 @@ function App() {
                           ))}
                       </div>
                       <div style={{marginTop:'20px', display:'flex', alignItems:'center', gap:'10px', fontSize:'0.8rem', opacity:0.7}}>
-                          <span>Less</span>
+                          <span>Chudmaxxing</span>
                           <div style={{width:'15px', height:'15px', background:'rgba(255,255,255,0.05)', borderRadius:'3px'}}></div>
                           <div style={{width:'15px', height:'15px', background: getIntensityColor(1800), borderRadius:'3px'}}></div>
                           <div style={{width:'15px', height:'15px', background: getIntensityColor(7200), borderRadius:'3px'}}></div>
                           <div style={{width:'15px', height:'15px', background: getIntensityColor(14400), borderRadius:'3px'}}></div>
                           <div style={{width:'15px', height:'15px', background: getIntensityColor(22000), borderRadius:'3px'}}></div>
-                          <span>More</span>
+                          <span>Locked In</span>
                       </div>
                   </div>
               )}
