@@ -1,6 +1,6 @@
 {
   "name": "logit",
-  "version": "1.0.2",
+  "version": "2.0.0",
   "main": "public/main.js",
   "homepage": "./",
   "dependencies": {
@@ -15,6 +15,7 @@
     "react-router-dom": "^7.13.0",
     "react-scripts": "5.0.1",
     "recharts": "^3.6.0",
+    "socket.io-client": "^4.8.3",
     "web-vitals": "^2.1.4"
   },
   "scripts": {
@@ -38,6 +39,9 @@
     "directories": {
       "buildResources": "assets"
     },
+    "extraResources": [
+      "extraResources/**"
+    ],
     "extraMetadata": {
       "main": "build/main.js"
     },

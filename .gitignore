@@ -24,3 +24,13 @@ yarn-error.log*
 
 dist
 dist/
+
+# PyInstaller and AI Build Artifacts
+src/build/
+src/dist/
+*.spec
+extraResources/*.exe
+extraResources/*.pt
+
+# Electron Build Output
+dist/

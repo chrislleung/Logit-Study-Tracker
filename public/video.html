@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Get Back To Work!</title>
+    <style>
+        body { 
+            margin: 0; 
+            background: #000; 
+            display: flex; 
+            flex-direction: column; 
+            justify-content: center; 
+            align-items: center; 
+            height: 100vh; 
+            overflow: hidden; 
+            font-family: sans-serif; 
+        }
+        video { 
+            max-width: 90%; 
+            max-height: 80vh; 
+            border-radius: 10px; 
+            box-shadow: 0 0 30px rgba(255,0,0,0.5);
+        }
+        button { 
+            margin-top: 20px; 
+            padding: 10px 20px; 
+            font-size: 1.2rem; 
+            cursor: pointer; 
+            background: #ff4d4d; 
+            color: white; 
+            border: none; 
+            border-radius: 5px; 
+            font-weight: bold;
+        }
+        button:hover { background: #ff1a1a; }
+    </style>
+</head>
+<body>
+    <video id="alert-video" autoplay controls onended="window.close()"></video>
+    <button onclick="window.close()">I'm Back To Work</button>
+
+    <script>
+        // Check if React sent a custom video URL via query parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const customVideo = urlParams.get('video');
+        
+        const videoEl = document.getElementById('alert-video');
+        
+        if (customVideo) {
+            videoEl.src = customVideo;
+        } else {
+            // Fallback to default
+            videoEl.src = "./get_back_to_work.mp4";
+        }
+    </script>
+</body>
+</html>
