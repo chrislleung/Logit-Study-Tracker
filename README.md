@@ -1,16 +1,16 @@
-# 📚 Study Tracker
+# Study Tracker
 
 A powerful, offline-first React application designed to help students track study time, manage grades, and analyze their study efficiency. It features a fully customizable UI, predictive grade calculation, and persistent local storage.
 
-## 🚀 Features
+## Features
 
-### ⏱️ Time Tracking
+### Time Tracking
 * **Live Timer:** Track study sessions in real-time for specific classes.
 * **Session Logs:** View a history of all study sessions.
 * **Log Management:** Manually add missed sessions, edit timestamps, or delete logs.
 * **Totals:** View total study time per subject and for the entire semester.
 
-### 📊 Analytics & Grades
+### Analytics & Grades
 * **Grade Tracker:** Record grades for assignments, exams, and quizzes.
 * **Visual Analytics:** * **Efficiency Chart:** See how your grades correlate with time spent studying.
     * **Correlation Scatter Plot:** Identify trends in your study habits.
@@ -19,19 +19,19 @@ A powerful, offline-first React application designed to help students track stud
     * **"What do I need?"**: Enter a target grade to see exactly what score you need on remaining assignments.
     * **Time Prediction:** Uses regression analysis to estimate how many hours you need to study to achieve your target score.
 
-### 🎨 Customization
+### Customization
 * **Full Theming:** Customize the Primary (buttons), Accent (tabs/text), Background, and Text colors.
 * **GIF Decorations:** Upload custom GIFs to display alongside the timer for motivation (or fun).
 * **Layout Controls:** Adjust the size and spacing of your decorative GIFs directly in the settings.
 * **Persisted Settings:** All theme preferences are saved automatically.
 
-### 🔒 Privacy & Storage
+### Privacy & Storage
 * **Offline-First:** No accounts or internet connection required.
 * **Local Database:** Uses **Dexie.js (IndexedDB)** to store all data directly in your browser. Your data never leaves your device.
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 * **Frontend:** React.js
 * **Database:** Dexie.js (IndexedDB wrapper)
@@ -41,7 +41,7 @@ A powerful, offline-first React application designed to help students track stud
 
 ---
 
-## 📦 Installation
+## Installation
 
 1.  **Clone the repository:**
     ```bash
@@ -62,7 +62,7 @@ A powerful, offline-first React application designed to help students track stud
 
 ---
 
-## 🖥️ Building for Windows (Electron)
+## Building for Windows (Electron)
 
 To package this app as a standalone Windows program (`.exe`):
 
@@ -84,7 +84,7 @@ To package this app as a standalone Windows program (`.exe`):
 
 ---
 
-## 📖 Usage Guide
+## Usage Guide
 
 ### 1. Setting Up Classes
 * Create a **New Semester** using the tab bar.
@@ -110,7 +110,7 @@ To package this app as a standalone Windows program (`.exe`):
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 Pull requests are welcome! For major changes, please open an issue first to discuss what you would like to change.
 
