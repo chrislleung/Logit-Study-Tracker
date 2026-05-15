@@ -79,6 +79,7 @@ function App() {
   // NEW: Session History Filters
   const [historySubjectFilter, setHistorySubjectFilter] = useState("All");
   const [historyTagFilter, setHistoryTagFilter] = useState("All");
+  const [isHistoryCollapsed, setIsHistoryCollapsed] = useState(false);
 
   const [subjects, setSubjects] = useState([]);
   const [showLogForm, setShowLogForm] = useState(false);
@@ -126,6 +127,29 @@ function App() {
           return matchSub && matchTag;
       });
   }, [sessions, historySubjectFilter, historyTagFilter]);
+
+  const historyTagOptions = useMemo(() => {
+      const sourceSessions = historySubjectFilter === "All"
+          ? sessions
+          : sessions.filter(s => s.subject === historySubjectFilter);
+      const taggedOptions = Array.from(new Set(sourceSessions.map(s => s.tag).filter(Boolean))).sort();
+      const hasUntaggedSessions = sourceSessions.some(s => !s.tag);
+      return { taggedOptions, hasUntaggedSessions };
+  }, [sessions, historySubjectFilter]);
+
+  useEffect(() => {
+      if (
+          historyTagFilter !== "All" &&
+          historyTagFilter !== "No Tag" &&
+          !historyTagOptions.taggedOptions.includes(historyTagFilter)
+      ) {
+          setHistoryTagFilter("All");
+      }
+
+      if (historyTagFilter === "No Tag" && !historyTagOptions.hasUntaggedSessions) {
+          setHistoryTagFilter("All");
+      }
+  }, [historyTagFilter, historyTagOptions]);
 
   const showAlert = (title, message) => { setModalConfig({ isOpen: true, title, message, type: 'alert', onConfirm: null }); };
   const showConfirm = (title, message, action) => { setModalConfig({ isOpen: true, title, message, type: 'confirm', onConfirm: action }); };
@@ -1197,7 +1221,16 @@ function App() {
                             
                             <div className="history-container">
                                 <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:'20px', marginBottom:'10px', flexWrap:'wrap', gap:'10px'}}>
-                                    <h3 style={{margin:0}}>Session History</h3>
+                                    <button
+                                        type="button"
+                                        className="history-collapse-btn"
+                                        onClick={() => setIsHistoryCollapsed(!isHistoryCollapsed)}
+                                        aria-expanded={!isHistoryCollapsed}
+                                        aria-controls="session-history-content"
+                                    >
+                                        <span>Session History</span>
+                                        <span className="history-toggle-icon">{isHistoryCollapsed ? "▼" : "▲"}</span>
+                                    </button>
                                     
                                     {/* --- NEW: Session History Filters --- */}
                                     <div style={{display:'flex', gap:'10px', flexWrap:'wrap'}}>
@@ -1207,12 +1240,14 @@ function App() {
                                         </select>
                                         <select value={historyTagFilter} onChange={e => setHistoryTagFilter(e.target.value)} style={{fontSize:'0.8rem', padding:'4px', background:'rgba(255,255,255,0.1)', color:textColor, border:`1px solid ${textColor}`, borderRadius:'4px'}}>
                                             <option value="All">All Tags</option>
-                                            <option value="No Tag">No Tag</option>
-                                            {Array.from(new Set(sessions.map(s => s.tag).filter(t => t))).sort().map(tag => <option key={tag} value={tag}>{tag}</option>)}
+                                            {historyTagOptions.hasUntaggedSessions && <option value="No Tag">No Tag</option>}
+                                            {historyTagOptions.taggedOptions.map(tag => <option key={tag} value={tag}>{tag}</option>)}
                                         </select>
                                         <button className="btn-small" onClick={openAddLogForm}>+ Add Log</button>
                                     </div>
                                 </div>
+                                {!isHistoryCollapsed && (
+                                    <div id="session-history-content">
                                 <table>
                                     <thead>
                                     <tr><th>Date</th><th>Class</th><th>Tag</th><th>Start</th><th>End</th><th>Duration</th><th style={{textAlign:'center'}}>Actions</th></tr>
@@ -1237,6 +1272,8 @@ function App() {
                                     )}
                                     </tbody>
                                 </table>
+                                    </div>
+                                )}
                             </div>
                         </div>
                         <div className="right-column">
