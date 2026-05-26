@@ -45,7 +45,7 @@ A powerful, offline-first React application designed to help students track stud
 
 1.  **Clone the repository:**
     ```bash
-    git clone [https://github.com/yourusername/study-tracker.git](https://github.com/yourusername/study-tracker.git)
+    git clone https://github.com/chrislleung/Logit-Study-Tracker.git
     cd study-tracker
     ```
 
