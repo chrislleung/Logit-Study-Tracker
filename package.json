@@ -81,6 +81,7 @@
     "cross-env": "^10.1.0",
     "electron": "^39.2.7",
     "electron-builder": "^26.0.12",
+    "eslint-plugin-jest": "^25.7.0",
     "wait-on": "^9.0.3"
   }
 }

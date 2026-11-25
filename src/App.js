@@ -6,6 +6,8 @@ import {
 import './App.css';
 import { db } from './db'; 
 import io from 'socket.io-client';
+import { Pencil } from 'lucide-react';
+import { applyClassOperation, createClass, validateUniqueClassName } from './classOperations';
 
 const OptimizedImage = React.memo(({ src, size, side, spacing }) => {
     if (!src) return <div style={{width: `${size}px`}}></div>; 
@@ -73,23 +75,28 @@ function App() {
   const selectedSubjectRef = useRef("");
   const sessionTagRef = useRef("");
   const activeSemesterIdRef = useRef(null);
+  const selectedSubjectIdRef = useRef(null);
+  const timerSemesterIdRef = useRef(null);
 
   const [sessions, setSessions] = useState([]);
   
   // NEW: Session History Filters
   const [historySubjectFilter, setHistorySubjectFilter] = useState("All");
   const [historyTagFilter, setHistoryTagFilter] = useState("All");
-  const [isHistoryCollapsed, setIsHistoryCollapsed] = useState(false);
+  const [isHistoryCollapsed, setIsHistoryCollapsed] = useState(true);
 
   const [subjects, setSubjects] = useState([]);
   const [showLogForm, setShowLogForm] = useState(false);
-  const [logFormData, setLogFormData] = useState({ id: null, subject: "", tag: "", startTime: "", endTime: "" });
+  const [logFormData, setLogFormData] = useState({ id: null, subjectId: "", subject: "", tag: "", startTime: "", endTime: "" });
   const [logFormTypes, setLogFormTypes] = useState([]); 
 
   const [selectedSubject, setSelectedSubject] = useState(""); 
   const [selectedSubjectId, setSelectedSubjectId] = useState(""); 
   const [newSubjectName, setNewSubjectName] = useState("");
   const [showManageClasses, setShowManageClasses] = useState(false);
+  const [editingSubject, setEditingSubject] = useState(null);
+  const [classChoice, setClassChoice] = useState(null);
+  const [classConflict, setClassConflict] = useState(null);
 
   const [assessments, setAssessments] = useState([]);
   const [newAssessment, setNewAssessment] = useState({ name: "", type: "", date: "", grade: "" });
@@ -162,7 +169,7 @@ function App() {
       let sourceSessions = viewingGlobalCalendar ? globalSessions : sessions;
       
       if (calendarSubjectFilter !== "All") {
-          sourceSessions = sourceSessions.filter(s => s.subject === calendarSubjectFilter);
+          sourceSessions = sourceSessions.filter(s => s.subjectId === Number(calendarSubjectFilter));
       }
 
       if (!sourceSessions || sourceSessions.length === 0) return data;
@@ -235,7 +242,7 @@ function App() {
     const calendarStats = useMemo(() => {
       let sourceSessions = viewingGlobalCalendar ? globalSessions : sessions;
       if (calendarSubjectFilter !== "All") {
-          sourceSessions = sourceSessions.filter(s => s.subject === calendarSubjectFilter);
+          sourceSessions = sourceSessions.filter(s => s.subjectId === Number(calendarSubjectFilter));
       }
 
       const currentYear = currentDate.getFullYear();
@@ -272,12 +279,14 @@ function App() {
       }
 
       return { monthSecs, weekSecs, todaySecs };
+  // getWeekDays is derived from currentDate, which is already tracked here.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessions, globalSessions, viewingGlobalCalendar, calendarSubjectFilter, currentDate]);
 
   const getSessionsForDate = (dateObj) => { 
       let sourceSessions = viewingGlobalCalendar ? globalSessions : sessions;
       if (calendarSubjectFilter !== "All") {
-          sourceSessions = sourceSessions.filter(s => s.subject === calendarSubjectFilter);
+          sourceSessions = sourceSessions.filter(s => s.subjectId === Number(calendarSubjectFilter));
       }
       return sourceSessions.filter(s => new Date(s.startTime).toLocaleDateString() === dateObj.toLocaleDateString()); 
   };
@@ -340,7 +349,7 @@ function App() {
 
   const assessmentStats = useMemo(() => {
     if (!assessments.length) return [];
-    const subjectSessions = sessions.filter(s => s.subject === selectedSubject);
+    const subjectSessions = sessions.filter(s => s.subjectId === selectedSubjectId || (s.subjectId == null && s.subject === selectedSubject));
     const processedAssessments = [];
     const distinctTypes = new Set(assessments.map(a => a.type)); assignmentTypes.forEach(t => distinctTypes.add(t));
     const allTypesToProcess = Array.from(distinctTypes);
@@ -361,7 +370,7 @@ function App() {
         });
     });
     return processedAssessments.sort((a, b) => new Date(a.date) - new Date(b.date));
-  }, [assessments, sessions, selectedSubject, assignmentTypes]);
+  }, [assessments, sessions, selectedSubject, selectedSubjectId, assignmentTypes]);
 
   const filteredAssessments = useMemo(() => { const hasFilter = Object.keys(visibleTypes).length > 0; if (!hasFilter) return assessmentStats; return assessmentStats.filter(a => visibleTypes[a.type]); }, [assessmentStats, visibleTypes]);
   const scatterData = useMemo(() => { return filteredAssessments.filter(a => a.numericGrade > 0).map(a => ({ x: a.hours, y: a.numericGrade, name: `${a.name} (${a.type})` })); }, [filteredAssessments]);
@@ -484,12 +493,15 @@ function App() {
     };
   }, [gradeEntries, assessments, weights, targetGrade, assignmentTypes, remainingItems, avgEfficiency, filteredAssessments]);
 
+  // Initial database load only; fetchSemesters intentionally uses the initial selection state.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchSemesters(); }, []);
   useEffect(() => { isStudyingRef.current = isStudying; }, [isStudying]);
   useEffect(() => { startTimeRef.current = startTime; }, [startTime]);
   useEffect(() => { selectedSubjectRef.current = selectedSubject; }, [selectedSubject]);
   useEffect(() => { sessionTagRef.current = sessionTag; }, [sessionTag]);
   useEffect(() => { activeSemesterIdRef.current = activeSemesterId; }, [activeSemesterId]);
+  useEffect(() => { selectedSubjectIdRef.current = selectedSubjectId; }, [selectedSubjectId]);
   useEffect(() => { customVideoRef.current = customVideo; }, [customVideo]);
 
   // Fetch Global Data whenever "Global Calendar" is active
@@ -504,7 +516,7 @@ function App() {
       const handleBeforeUnload = (event) => {
           if (isStudyingRef.current && startTimeRef.current && selectedSubjectRef.current) {
               const endTime = Date.now(); const duration = Math.floor((endTime - startTimeRef.current) / 1000);
-              db.sessions.add({ startTime: new Date(startTimeRef.current).toISOString(), endTime: new Date(endTime).toISOString(), durationSeconds: duration, subject: selectedSubjectRef.current, tag: sessionTagRef.current, semesterId: activeSemesterIdRef.current });
+              db.sessions.add({ startTime: new Date(startTimeRef.current).toISOString(), endTime: new Date(endTime).toISOString(), durationSeconds: duration, subject: selectedSubjectRef.current, subjectId: selectedSubjectIdRef.current, tag: sessionTagRef.current, semesterId: timerSemesterIdRef.current || activeSemesterIdRef.current });
           }
       };
       window.addEventListener("beforeunload", handleBeforeUnload); return () => window.removeEventListener("beforeunload", handleBeforeUnload);
@@ -591,7 +603,7 @@ function App() {
   }, []);
   
   const fetchSemesters = async () => { const data = await db.semesters.toArray(); setSemesters(data); const actives = data.filter(s => !s.archived); if (actives.length > 0 && !activeSemesterId) { setActiveSemesterId(actives[0].id); setPrevSemesterId(actives[0].id); } };
-  const fetchSubjects = async (semId) => { const data = await db.subjects.where('semesterId').equals(semId).toArray(); setSubjects(data); const savedId = selectionsRef.current[semId]; if (savedId && data.find(s => s.id === savedId)) { const sub = data.find(s => s.id === savedId); setSelectedSubject(sub.name); setSelectedSubjectId(sub.id); } else { setSelectedSubject(""); setSelectedSubjectId(""); } };
+  const fetchSubjects = async (semId) => { const data = await db.subjects.where('semesterId').equals(semId).toArray(); setSubjects(data); const savedId = selectionsRef.current[semId]; if (savedId && data.find(s => s.id === savedId)) { const sub = data.find(s => s.id === savedId); setSelectedSubject(sub.name); setSelectedSubjectId(sub.id); } else if (!(isStudyingRef.current && selectedSubjectIdRef.current)) { setSelectedSubject(""); setSelectedSubjectId(""); } };
   const fetchSessions = async (semId) => { const data = await db.sessions.where('semesterId').equals(semId).toArray(); data.sort((a, b) => new Date(b.startTime) - new Date(a.startTime)); setSessions(data); };
   
   // --- Global fetcher ---
@@ -618,8 +630,8 @@ function App() {
   const startEditingAssessment = (assess) => { setEditingAssessmentId(assess.id); setEditAssessmentData({ name: assess.name, type: assess.type, date: assess.date, grade: assess.grade }); setOpenAssessmentMenu(null); };
   const saveAssessment = async () => { if (!editingAssessmentId) return; await db.assessments.update(editingAssessmentId, editAssessmentData); setEditingAssessmentId(null); fetchAssessments(selectedSubjectId); };
   const handleDeleteAssessment = async (id) => { await db.assessments.delete(id); fetchAssessments(selectedSubjectId); };
-  const handleSubjectChange = (e) => { const subName = e.target.value; setSelectedSubject(subName); const subObj = subjects.find(s => s.name === subName); const newId = subObj ? subObj.id : ""; setSelectedSubjectId(newId); setSessionTag(""); if (activeSemesterId) selectionsRef.current[activeSemesterId] = newId; };
-  const handleStart = () => { if (!selectedSubject) return showAlert("No Class", "Select a class first!"); setStartTime(Date.now()); setIsStudying(true); setElapsed(0); };
+  const handleSubjectChange = (e) => { const newId = Number(e.target.value); const subObj = subjects.find(s => s.id === newId); setSelectedSubject(subObj ? subObj.name : ""); setSelectedSubjectId(subObj ? subObj.id : ""); setSessionTag(""); if (activeSemesterId) selectionsRef.current[activeSemesterId] = subObj ? subObj.id : ""; };
+  const handleStart = () => { if (!selectedSubjectId) return showAlert("No Class", "Select a class first!"); timerSemesterIdRef.current = activeSemesterId; setStartTime(Date.now()); setIsStudying(true); setElapsed(0); };
   const handleStop = async () => { 
     setIsStudying(false); 
     const endTime = Date.now(); 
@@ -627,11 +639,16 @@ function App() {
         startTime: new Date(startTime).toISOString(), 
         endTime: new Date(endTime).toISOString(), 
         durationSeconds: Math.floor((endTime - startTime) / 1000), 
-        subject: selectedSubject, 
+        subject: selectedSubjectRef.current,
+        subjectId: selectedSubjectIdRef.current,
         tag: sessionTag, 
-        semesterId: activeSemesterId 
+        semesterId: timerSemesterIdRef.current || activeSemesterId
     }); 
-    fetchSessions(activeSemesterId); 
+    fetchSessions(activeSemesterId);
+    if ((timerSemesterIdRef.current || activeSemesterId) !== activeSemesterId) {
+      setSelectedSubject(""); setSelectedSubjectId("");
+    }
+    timerSemesterIdRef.current = null;
     // Removed setSessionTag(""); so your category stays selected
   };
   const formatTime = (seconds) => { const h = Math.floor(seconds / 3600); const m = Math.floor((seconds % 3600) / 60); const s = Math.floor(seconds % 60); return `${h}h ${m}m ${s}s`; };
@@ -654,15 +671,62 @@ function App() {
   const startEditingSemester = (sem) => { setEditingSemesterId(sem.id); setTempSemesterName(sem.name); setOpenTabMenu(null); };
   const handleArchiveSemester = async (id, currentStatus) => { await db.semesters.update(id, { archived: !currentStatus }); fetchSemesters(); if (activeSemesterId === id) setActiveSemesterId(null); };
   const handleDeleteSemester = async (id) => { showConfirm("Delete Semester?", "Are you sure you want to delete this semester permanently?", async () => { await db.semesters.delete(id); fetchSemesters(); if (activeSemesterId === id) setActiveSemesterId(null); }); };
-  const handleAddSubject = async () => { if (!newSubjectName.trim() || !activeSemesterId) return; await db.subjects.add({ name: newSubjectName, semesterId: activeSemesterId }); setNewSubjectName(""); fetchSubjects(activeSemesterId); };
+  const handleAddSubject = async () => { try { if (!activeSemesterId) return; await createClass(db, activeSemesterId, newSubjectName); setNewSubjectName(""); fetchSubjects(activeSemesterId); } catch (error) { showAlert("Could Not Add Class", error.message); } };
   const handleDeleteSubject = async (id) => { await db.subjects.delete(id); fetchSubjects(activeSemesterId); };
+
+  const startEditingSubject = subject => setEditingSubject({ id: subject.id, originalName: subject.name, name: subject.name, semesterId: subject.semesterId });
+  const refreshClassData = async () => {
+      await Promise.all([fetchSubjects(activeSemesterId), fetchSessions(activeSemesterId), fetchSemesters()]);
+      if (viewingGlobalCalendar) await fetchGlobalSessions();
+      const everySubject = await db.subjects.toArray(); setAllSubjects(everySubject);
+  };
+  const runClassOperation = async details => {
+      try {
+          const result = await applyClassOperation(db, details);
+          const cleanName = details.incomingName.trim();
+          if (result.operation !== 'duplicate' && selectedSubjectIdRef.current === details.subjectId) {
+              setSelectedSubject(cleanName); selectedSubjectRef.current = cleanName;
+              if (result.operation === 'move') timerSemesterIdRef.current = details.destinationSemesterId;
+          }
+          setHistorySubjectFilter("All");
+          setCalendarSubjectFilter("All");
+          setEditingSubject(null); setClassChoice(null); setClassConflict(null);
+          await refreshClassData();
+      } catch (error) { showAlert("Class Update Failed", error.message || "No changes were saved."); }
+  };
+  const chooseClassOperation = async operation => {
+      const pending = classChoice;
+      if (!pending) return;
+      const all = await db.subjects.toArray();
+      const validation = validateUniqueClassName(all, pending.destinationSemesterId, pending.incomingName, operation === 'move' ? [pending.subjectId] : []);
+      if (!validation.valid && validation.conflict) {
+          setClassChoice(null);
+          setClassConflict({ ...pending, operation, incomingName: pending.incomingName.trim(), existingSubjectId: validation.conflict.id, existingName: validation.conflict.name });
+          return;
+      }
+      if (!validation.valid) return showAlert("Invalid Class Name", validation.error);
+      await runClassOperation({ ...pending, operation });
+  };
+  const saveSubjectEdit = async () => {
+      const name = editingSubject.name.trim();
+      if (!name) return showAlert("Invalid Class Name", "Class name cannot be empty.");
+      if (editingSubject.semesterId !== subjects.find(subject => subject.id === editingSubject.id)?.semesterId) {
+          setClassChoice({ subjectId: editingSubject.id, destinationSemesterId: editingSubject.semesterId, incomingName: name });
+          return;
+      }
+      const all = await db.subjects.toArray();
+      const validation = validateUniqueClassName(all, editingSubject.semesterId, name, [editingSubject.id]);
+      if (!validation.valid) return showAlert("Duplicate Class Name", validation.error);
+      await runClassOperation({ subjectId: editingSubject.id, destinationSemesterId: editingSubject.semesterId, incomingName: name, operation: 'rename' });
+  };
   
   // --- Modals adapt to global calendar variables if active ---
   const openAddLogForm = () => { 
       const currentSubjects = viewingGlobalCalendar ? allSubjects : subjects;
       const now = new Date(); const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000); 
       const toLocalISO = (d) => { const offset = d.getTimezoneOffset() * 60000; return new Date(d.getTime() - offset).toISOString().slice(0, 16); }; 
-      setLogFormData({ id: null, subject: selectedSubject || (currentSubjects.length > 0 ? currentSubjects[0].name : ""), tag: "", startTime: toLocalISO(oneHourAgo), endTime: toLocalISO(now) }); 
+      const initial = currentSubjects.find(subject => subject.id === selectedSubjectId) || currentSubjects[0];
+      setLogFormData({ id: null, subjectId: initial?.id || "", subject: initial?.name || "", tag: "", startTime: toLocalISO(oneHourAgo), endTime: toLocalISO(now) });
       setLogFormTypes(currentSubjects.length > 0 ? (currentSubjects[0].assignmentTypes || []) : []); 
       setShowLogForm(true); 
   };
@@ -670,19 +734,19 @@ function App() {
   const handleEditLog = (session) => { 
       const toLocalInput = (iso) => { const d = new Date(iso); const offset = d.getTimezoneOffset() * 60000; return new Date(d.getTime() - offset).toISOString().slice(0, 16); }; 
       const currentSubjects = viewingGlobalCalendar ? allSubjects : subjects;
-      const logSubject = currentSubjects.find(s => s.name === session.subject); 
+      const logSubject = currentSubjects.find(s => s.id === session.subjectId) || currentSubjects.find(s => s.name === session.subject && s.semesterId === session.semesterId);
       let types = []; if (logSubject && logSubject.assignmentTypes) { types = logSubject.assignmentTypes; } 
       setLogFormTypes(types); 
-      setLogFormData({ id: session.id, subject: session.subject, tag: session.tag || "", startTime: toLocalInput(session.startTime), endTime: toLocalInput(session.endTime) }); 
+      setLogFormData({ id: session.id, subjectId: logSubject?.id || session.subjectId || "", subject: logSubject?.name || session.subject, tag: session.tag || "", startTime: toLocalInput(session.startTime), endTime: toLocalInput(session.endTime) });
       setSelectedDay(null); setShowLogForm(true); 
   };
   
-  const handleLogFormSubjectChange = (newSubjectName) => { 
+  const handleLogFormSubjectChange = (newSubjectId) => {
       const currentSubjects = viewingGlobalCalendar ? allSubjects : subjects;
-      const logSubject = currentSubjects.find(s => s.name === newSubjectName); 
+      const logSubject = currentSubjects.find(s => s.id === Number(newSubjectId));
       let types = []; if (logSubject && logSubject.assignmentTypes) { types = logSubject.assignmentTypes; } 
       setLogFormTypes(types); 
-      setLogFormData({...logFormData, subject: newSubjectName, tag: ""}); 
+      setLogFormData({...logFormData, subjectId: logSubject?.id || "", subject: logSubject?.name || "", tag: ""});
   };
   
   const handleDeleteLog = async (id) => { 
@@ -701,10 +765,10 @@ function App() {
       const duration = Math.floor((end - start) / 1000); 
       
       const currentSubjects = viewingGlobalCalendar ? allSubjects : subjects;
-      const logSubjectObj = currentSubjects.find(s => s.name === logFormData.subject);
+      const logSubjectObj = currentSubjects.find(s => s.id === Number(logFormData.subjectId));
       const logSemesterId = logSubjectObj ? logSubjectObj.semesterId : activeSemesterId;
 
-      const payload = { subject: logFormData.subject, tag: logFormData.tag, startTime: start.toISOString(), endTime: end.toISOString(), durationSeconds: duration, semesterId: logSemesterId }; 
+      const payload = { subject: logSubjectObj?.name || logFormData.subject, subjectId: logSubjectObj?.id || logFormData.subjectId || undefined, tag: logFormData.tag, startTime: start.toISOString(), endTime: end.toISOString(), durationSeconds: duration, semesterId: logSemesterId };
       if(logFormData.id) { await db.sessions.update(logFormData.id, payload); } else { await db.sessions.add(payload); } 
       setShowLogForm(false); 
       fetchSessions(activeSemesterId); 
@@ -735,8 +799,7 @@ function App() {
   // --- Dynamic Subject List for the Calendar Filter ---
   const calendarFilterSubjects = useMemo(() => {
       const source = viewingGlobalCalendar ? allSubjects : subjects;
-      const uniqueNames = Array.from(new Set(source.map(s => s.name)));
-      return uniqueNames.sort();
+      return [...source].sort((a, b) => a.name.localeCompare(b.name));
   }, [viewingGlobalCalendar, allSubjects, subjects]);
 
   // --- Reusable Calendar Component UI ---
@@ -768,8 +831,8 @@ function App() {
                       style={{padding: '6px', fontSize: '0.9rem', width: 'auto', minWidth: '150px'}}
                   >
                       <option value="All">All Classes</option>
-                      {calendarFilterSubjects.map(subName => (
-                          <option key={subName} value={subName}>{subName}</option>
+                      {calendarFilterSubjects.map(subject => (
+                          <option key={subject.id} value={subject.id}>{subject.name}{viewingGlobalCalendar ? ` — ${semesters.find(semester => semester.id === subject.semesterId)?.name || 'Unknown semester'}` : ''}</option>
                       ))}
                   </select>
               </div>
@@ -949,6 +1012,40 @@ function App() {
             </div>
         )}
 
+        {classChoice && (
+            <div className="modal-overlay" onClick={() => setClassChoice(null)}>
+                <div className="modal-content class-operation-dialog" onClick={event => event.stopPropagation()}>
+                    <h3 className="modal-title">Move or Duplicate Class?</h3>
+                    <div className="modal-body">
+                        <p><strong>Move</strong> transfers the class, its study sessions, grades, assessments, and settings.</p>
+                        <p><strong>Duplicate</strong> creates a new class with copied configuration only. Study time, grades, and assessments stay with the original.</p>
+                    </div>
+                    <div className="modal-actions">
+                        <button className="btn-small secondary-action" onClick={() => setClassChoice(null)}>Cancel</button>
+                        <button className="btn-small" onClick={() => chooseClassOperation('duplicate')}>Duplicate</button>
+                        <button className="btn-small" onClick={() => chooseClassOperation('move')}>Move</button>
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {classConflict && (
+            <div className="modal-overlay" onClick={() => setClassConflict(null)}>
+                <div className="modal-content class-operation-dialog" onClick={event => event.stopPropagation()}>
+                    <h3 className="modal-title">Resolve Class Name Conflict</h3>
+                    <div className="modal-body conflict-form">
+                        <p>“{classConflict.incomingName}” conflicts with “{classConflict.existingName}” in the destination semester. Rename either or both classes before continuing.</p>
+                        <label>Incoming class<input value={classConflict.incomingName} onChange={event => setClassConflict({...classConflict, incomingName: event.target.value})} /></label>
+                        <label>Existing destination class<input value={classConflict.existingName} onChange={event => setClassConflict({...classConflict, existingName: event.target.value})} /></label>
+                    </div>
+                    <div className="modal-actions">
+                        <button className="btn-small secondary-action" onClick={() => setClassConflict(null)}>Cancel</button>
+                        <button className="btn-small" onClick={() => runClassOperation(classConflict)}>Apply Changes</button>
+                    </div>
+                </div>
+            </div>
+        )}
+
         {/* --- Day View Details Modal --- */}
         {selectedDay && (
             <div className="modal-overlay" onClick={() => setSelectedDay(null)}>
@@ -980,8 +1077,8 @@ function App() {
                     <h3 className="modal-title">{logFormData.id ? "Edit Log" : "New Log"}</h3>
                     <div className="modal-body">
                         <label style={{display:'block', marginBottom:'5px', fontSize:'0.9rem'}}>Class:</label>
-                        <select value={logFormData.subject} onChange={e => handleLogFormSubjectChange(e.target.value)} style={{width:'100%', marginBottom:'15px', padding:'8px'}}>
-                            {(viewingGlobalCalendar ? allSubjects : subjects).map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                        <select value={logFormData.subjectId} onChange={e => handleLogFormSubjectChange(e.target.value)} style={{width:'100%', marginBottom:'15px', padding:'8px'}}>
+                            {(viewingGlobalCalendar ? allSubjects : subjects).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                         </select>
                         <label style={{display:'block', marginBottom:'5px', fontSize:'0.9rem'}}>Tag (Category):</label>
                         <select value={logFormData.tag} onChange={e => setLogFormData({...logFormData, tag: e.target.value})} style={{width:'100%', marginBottom:'15px', padding:'8px'}}>
@@ -1208,7 +1305,7 @@ function App() {
                             <div style={{display:'grid', gridTemplateColumns: `1fr auto 1fr`, gap:`${gifSpacing}px`, alignItems:'center'}}>
                                 <div style={{justifySelf:'end'}}><OptimizedImage src={leftGif} size={gifSize} side="left" spacing={gifSpacing} /></div>
                                 <div className="timer-container" style={{margin:0}}>
-                                    <select value={selectedSubject} onChange={handleSubjectChange} className="subject-select"><option value="" disabled>Select a Class</option>{subjects.map(sub => <option key={sub.id} value={sub.name}>{sub.name}</option>)}</select>
+                                    <select value={selectedSubjectId} onChange={handleSubjectChange} className="subject-select" disabled={isStudying}><option value="" disabled>Select a Class</option>{isStudying && !subjects.some(sub => sub.id === selectedSubjectId) && <option value={selectedSubjectId}>{selectedSubject} (moved)</option>}{subjects.map(sub => <option key={sub.id} value={sub.id}>{sub.name}</option>)}</select>
                                     <select value={sessionTag} onChange={(e) => setSessionTag(e.target.value)} className="subject-select" style={{marginTop:'10px', fontSize:'0.9rem', width:'80%', opacity: selectedSubject ? 1 : 0.5}} disabled={!selectedSubject || isStudying}>
                                         <option value="">General Study (No Tag)</option>
                                         {assignmentTypes.map(t => (<option key={t} value={t}>{t}</option>))}
@@ -1321,7 +1418,18 @@ function App() {
                         </div>
                         <div className="management-container sidebar-style">
                             <div className="management-header" onClick={() => setShowManageClasses(!showManageClasses)}><h3>Manage Classes</h3><span className="toggle-icon">{showManageClasses ? "▲" : "▼"}</span></div>
-                            {showManageClasses && (<div className="management-content">{!viewingArchived && (<div className="add-subject-col"><input type="text" placeholder="New Class Name" value={newSubjectName} onChange={e => setNewSubjectName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddSubject()} /><button onClick={handleAddSubject} className="btn-full-width">Add Class</button></div>)}<div className="subject-list">{subjects.map(sub => <span key={sub.id} className="subject-tag">{sub.name} {!viewingArchived && <button onClick={() => handleDeleteSubject(sub.id)} className="x-btn">x</button>}</span>)}</div></div>)}
+                            {showManageClasses && (<div className="management-content">
+                                {!viewingArchived && (<div className="add-subject-col"><input type="text" placeholder="New Class Name" value={newSubjectName} onChange={e => setNewSubjectName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddSubject()} /><button onClick={handleAddSubject} className="btn-full-width">Add Class</button></div>)}
+                                <div className="subject-list">{subjects.map(sub => editingSubject?.id === sub.id ? (
+                                    <div key={sub.id} className="subject-edit-row">
+                                        <input aria-label="Class name" value={editingSubject.name} onChange={event => setEditingSubject({...editingSubject, name: event.target.value})} />
+                                        <select aria-label="Semester" value={editingSubject.semesterId} onChange={event => setEditingSubject({...editingSubject, semesterId: Number(event.target.value)})}>{semesters.map(semester => <option key={semester.id} value={semester.id}>{semester.name}{semester.archived ? ' (Archived)' : ''}</option>)}</select>
+                                        <div className="subject-edit-actions"><button className="btn-small secondary-action" onClick={() => setEditingSubject(null)}>Cancel</button><button className="btn-small" onClick={saveSubjectEdit}>Save</button></div>
+                                    </div>
+                                ) : (
+                                    <span key={sub.id} className="subject-tag">{sub.name}<button aria-label={`Edit ${sub.name}`} title="Edit class" onClick={() => startEditingSubject(sub)} className="edit-subject-btn"><Pencil size={14} /></button>{!viewingArchived && <button aria-label={`Delete ${sub.name}`} onClick={() => handleDeleteSubject(sub.id)} className="x-btn">x</button>}</span>
+                                ))}</div>
+                            </div>)}
                         </div>
                         </div>
                     </>
@@ -1350,7 +1458,7 @@ function App() {
                             <div className="calc-card">
                                 <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px'}}>
                                     <h3 style={{margin:0}}>Assignment Types & Weights</h3>
-                                    <select value={selectedSubject} onChange={handleSubjectChange} style={{padding:'4px', fontSize:'0.9rem', maxWidth:'150px'}}>{subjects.map(sub => <option key={sub.id} value={sub.name}>{sub.name}</option>)}</select>
+                                    <select value={selectedSubjectId} onChange={handleSubjectChange} style={{padding:'4px', fontSize:'0.9rem', maxWidth:'150px'}}>{subjects.map(sub => <option key={sub.id} value={sub.id}>{sub.name}</option>)}</select>
                                 </div>
                                 <div className="add-type-row"><input placeholder="New Category (e.g. Lab)" value={newTypeName} onChange={e => setNewTypeName(e.target.value)} /><button onClick={handleAddType} className="btn-small">Add</button></div>
                                 

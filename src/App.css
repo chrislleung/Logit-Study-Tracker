@@ -104,6 +104,14 @@ input { padding: 8px; border-radius: 5px; border: none; }
 .subject-list { margin-top: 15px; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
 .subject-tag { background-color: #61dafb; color: #282c34; padding: 5px 10px; border-radius: 15px; display: flex; align-items: center; font-weight: bold; }
 .x-btn { background: none; border: none; color: #d32f2f; font-weight: bold; cursor: pointer; margin-left: 8px; font-size: 1rem; }
+.edit-subject-btn { display: inline-flex; align-items: center; background: none; border: none; color: inherit; cursor: pointer; margin-left: 8px; padding: 2px; }
+.subject-edit-row { width: 100%; display: grid; gap: 8px; padding: 10px; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; background: rgba(255,255,255,0.05); }
+.subject-edit-row input, .subject-edit-row select { width: 100%; box-sizing: border-box; }
+.subject-edit-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.subject-edit-actions .btn-small, .modal-actions .btn-small { margin-left: 0; }
+.secondary-action { background: #666 !important; color: white !important; }
+.class-operation-dialog { width: 480px; }
+.conflict-form label { display: grid; gap: 5px; margin-top: 12px; font-size: 0.9rem; }
 
 table { margin-top: 20px; width: 100%; text-align: left; border-collapse: collapse; }
 th, td { padding: 10px; border-bottom: 1px solid #ddd; }
